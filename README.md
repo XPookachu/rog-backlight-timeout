@@ -15,7 +15,7 @@ or installer needed. Choose **Install (start at logon)** once (it asks for admin
 background agent starts with Windows and you only open the exe to change settings.
 
 ```
-  ROG Backlight Timeout                                   v1.0.0
+  ROG Backlight Timeout                                   v1.0.1
   Keyboard backlight timeout for ROG laptops · built-in input only
 
   ──────────────────────────────────────────────────────────────

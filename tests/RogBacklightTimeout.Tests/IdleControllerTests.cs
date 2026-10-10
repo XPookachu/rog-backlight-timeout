@@ -345,4 +345,33 @@ public sealed class IdleControllerTests
 
         Assert.Equal([0], h.Backlight.Writes);
         Assert.True(h.Controller.IsDimmed);
-    }}
+    }
+
+    [Fact]
+    public void Session_disconnect_with_the_lid_closed_writes_nothing()
+    {
+        using var h = new Harness(timeoutSeconds: 10);
+        h.Time.Advance(TimeSpan.FromSeconds(11));
+        h.Controller.OnLid(closed: true);
+
+        h.Controller.OnSessionDisconnected(true);
+
+        Assert.Equal([0], h.Backlight.Writes);
+    }
+
+    [Fact]
+    public void Failed_restore_on_session_disconnect_is_retried_on_next_input()
+    {
+        using var h = new Harness(timeoutSeconds: 10);
+        h.Time.Advance(TimeSpan.FromSeconds(11));
+
+        h.Backlight.Fail = true;
+        h.Controller.OnSessionDisconnected(true);
+        Assert.True(h.Controller.IsDimmed);
+
+        h.Backlight.Fail = false;
+        h.Controller.OnInternalInput();
+        Assert.False(h.Controller.IsDimmed);
+        Assert.Equal([0, 2], h.Backlight.Writes);
+    }
+}
