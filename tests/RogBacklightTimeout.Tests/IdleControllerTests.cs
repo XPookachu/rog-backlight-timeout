@@ -270,13 +270,57 @@ public sealed class IdleControllerTests
     }
 
     [Fact]
-    public void Start_restores_the_light_if_a_previous_instance_left_it_dark()
+    public void Start_writes_nothing_and_the_first_input_restores_the_light_a_previous_instance_left_dark()
     {
         using var h = new Harness(level: 3);
 
         h.Controller.Start();
+        Assert.Empty(h.Backlight.Writes);
 
+        h.Controller.OnInternalInput();
         Assert.Equal([3], h.Backlight.Writes);
+    }
+
+    [Fact]
+    public void Failed_restore_after_start_is_retried_on_the_next_input()
+    {
+        using var h = new Harness(level: 3);
+        h.Controller.Start();
+
+        h.Backlight.Fail = true;
+        h.Controller.OnInternalInput();
+        Assert.Empty(h.Backlight.Writes);
+
+        h.Backlight.Fail = false; // hardware recovered
+        h.Controller.OnInternalInput();
+        Assert.Equal([3], h.Backlight.Writes);
+    }
+
+    [Fact]
+    public void Start_with_the_lid_closed_writes_nothing_even_on_input_until_the_lid_opens()
+    {
+        using var h = new Harness(level: 3);
+        h.Controller.OnLid(closed: true);
+        h.Controller.Start();
+
+        h.Controller.OnInternalInput();
+        Assert.Empty(h.Backlight.Writes);
+
+        h.Controller.OnLid(closed: false);
+        h.Controller.OnInternalInput();
+        Assert.Equal([3], h.Backlight.Writes);
+    }
+
+    [Fact]
+    public void Dims_normally_after_start_when_nobody_types()
+    {
+        using var h = new Harness(level: 3, timeoutSeconds: 10);
+        h.Controller.Start();
+
+        h.Time.Advance(TimeSpan.FromSeconds(11));
+
+        Assert.Equal([0], h.Backlight.Writes);
+        Assert.True(h.Controller.IsDimmed);
     }
 
     [Fact]

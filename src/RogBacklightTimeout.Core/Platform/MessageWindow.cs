@@ -29,7 +29,14 @@ internal sealed unsafe class MessageWindow : IDisposable
     private IntPtr _powerSourceNotification;
     private bool _sessionNotification;
 
-    public MessageWindow() => _wndProc = WindowProc;
+    private readonly Action<string>? _warn;
+
+    /// <param name="warn">Receives a message when a Windows notification could not be registered.</param>
+    public MessageWindow(Action<string>? warn = null)
+    {
+        _wndProc = WindowProc;
+        _warn = warn;
+    }
 
     /// <summary>A keyboard or touchpad event; the argument is the Raw Input device handle (zero = injected/virtual).</summary>
     public event Action<IntPtr>? RawInput;
@@ -86,9 +93,14 @@ internal sealed unsafe class MessageWindow : IDisposable
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateWindowEx failed");
 
         RegisterRawInput();
+        // Registration failures are not fatal (input still works) but leave the lid, AC/battery or session safeguard
+        // without events: log them.
         _lidNotification = Native.RegisterPowerSettingNotification(_hwnd, Native.LidSwitchStateChange, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
+        if (_lidNotification == IntPtr.Zero) _warn?.Invoke($"Could not register for lid notifications (error {Marshal.GetLastWin32Error()})");
         _powerSourceNotification = Native.RegisterPowerSettingNotification(_hwnd, Native.AcDcPowerSource, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
+        if (_powerSourceNotification == IntPtr.Zero) _warn?.Invoke($"Could not register for power source notifications (error {Marshal.GetLastWin32Error()})");
         _sessionNotification = Native.WTSRegisterSessionNotification(_hwnd, Native.NOTIFY_FOR_THIS_SESSION);
+        if (!_sessionNotification) _warn?.Invoke($"Could not register for session notifications (error {Marshal.GetLastWin32Error()})");
 
         // Work queued before the window existed.
         if (!_posted.IsEmpty) Native.PostMessageW(_hwnd, Native.WM_APP, IntPtr.Zero, IntPtr.Zero);

@@ -11,7 +11,7 @@ namespace RogBacklightTimeout;
 internal static unsafe class PnpInspector
 {
     private const uint CrSuccess = 0;
-    private const uint DevPropTypeInt32 = 0x00000003;
+    private const uint DevPropTypeInt32 = 0x00000006;
     private const uint DevPropTypeUInt32 = 0x00000007;
     private const uint DevPropTypeGuid = 0x0000000D;
     private const uint DevPropTypeString = 0x00000012;

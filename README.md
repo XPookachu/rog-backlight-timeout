@@ -15,7 +15,7 @@ or installer needed. Choose **Install (start at logon)** once (it asks for admin
 background agent starts with Windows and you only open the exe to change settings.
 
 ```
-  ROG Backlight Timeout                                   v1.0.1
+  ROG Backlight Timeout                                   v1.0.2
   Keyboard backlight timeout for ROG laptops · built-in input only
 
   ──────────────────────────────────────────────────────────────
@@ -71,8 +71,8 @@ IdleController (Active / Dimmed)  --timeout-->  brightness 0
 - **Safety**: it writes only on an ASUS computer, only on models G-Helper also drives through this HID report (not
   ROG Ally, TUF, Vivobook, Zenbook, ProArt, ExpertBook), only to controllers whose USB product ID is in
   [`RogAuraProducts.cs`](src/RogBacklightTimeout.Core/Rog/RogAuraProducts.cs) and that expose feature report `0x5A`. The
-  bytes are constants; configuration cannot change them. If nothing supported is found the agent exits.
-- The agent restores the light when it stops, at session end, and on the next start after a crash. It runs elevated
+  bytes are constants; configuration cannot change them. If nothing supported is found (after retrying for about two minutes, since the controller can appear late at logon) the agent exits.
+- The agent restores the light when it stops, at session end, and on the first keypress after a crash. It runs elevated
   because Windows hides keyboard input from non-elevated background programs while an elevated window has focus, which
   is why it is installed under `%ProgramFiles%` (administrator-writable only).
 

@@ -32,9 +32,10 @@ public static class Autostart
     }
 
     /// <summary>Needs an administrator for the elevated task.</summary>
-    public static (bool Ok, string Message) Create(string user, string exePath, bool elevated)
+    /// <param name="xmlDirectory">Where the task definition is staged for schtasks. Use a folder only administrators can write.</param>
+    public static (bool Ok, string Message) Create(string user, string exePath, bool elevated, string? xmlDirectory = null)
     {
-        var file = Path.Combine(Path.GetTempPath(), $"RogBacklightTimeout-{Guid.NewGuid():N}.xml");
+        var file = Path.Combine(xmlDirectory ?? Path.GetTempPath(), $"RogBacklightTimeout-{Guid.NewGuid():N}.xml");
         File.WriteAllText(file, TaskXml.Build(user, exePath, elevated), Encoding.Unicode);
         try
         {

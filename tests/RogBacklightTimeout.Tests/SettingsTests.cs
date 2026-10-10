@@ -160,6 +160,41 @@ public sealed class GHelperLevelSourceTests : IDisposable
         Assert.Null(Source(onBattery: false).ReadGHelperTimeouts());
     }
     [Fact]
+    public void Comments_and_trailing_commas_are_accepted_like_ghelper_does()
+    {
+        // Off in G-Helper must stay off: a parse failure would return the fallback (2) and light the keyboard.
+        File.WriteAllText(_path, """
+            {
+              // user note
+              "keyboard_brightness": 0, /* inline */
+              "keyboard_timeout": 60,
+            }
+            """);
+
+        Assert.Equal(0, Source(onBattery: false, fallback: 2).GetRestoreLevel());
+        Assert.Equal((60, -1), Source(onBattery: false).ReadGHelperTimeouts());
+    }
+
+    [Fact]
+    public void Changing_the_configured_path_takes_effect_immediately()
+    {
+        var other = Path.Combine(Path.GetTempPath(), $"gh-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(_path, """{ "keyboard_brightness": 3 }""");
+            File.WriteAllText(other, """{ "keyboard_brightness": 1 }""");
+            var settings = new Settings { GHelperConfigPath = _path };
+            var source = new GHelperLevelSource(() => settings, () => false, new NullLog());
+
+            Assert.Equal(3, source.GetRestoreLevel());
+
+            settings = settings with { GHelperConfigPath = other };
+            Assert.Equal(1, source.GetRestoreLevel());
+        }
+        finally { File.Delete(other); }
+    }
+
+    [Fact]
     public void Missing_file_falls_back_and_stamp_is_zero()
     {
         Assert.Equal(2, Source(onBattery: false).GetRestoreLevel());

@@ -14,10 +14,18 @@ public sealed class GHelperLevelSource : ILevelSource
     private const string KeyBattery = "keyboard_brightness_ac";
     private const int GHelperDefaultLevel = 1;
 
+    // G-Helper reads its config with comments and trailing commas allowed (AppConfig.LenientOptions).
+    private static readonly JsonDocumentOptions LenientJson = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip,
+    };
+
     private readonly Func<Settings> _settings;
     private readonly Func<bool> _onBattery;
     private readonly ILog _log;
     private string? _cachedPath;
+    private string? _cachedFor;
     private long _cachedAt;
 
     public GHelperLevelSource(Func<Settings> settings, Func<bool> onBattery, ILog log)
@@ -54,7 +62,7 @@ public sealed class GHelperLevelSource : ILevelSource
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var doc = JsonDocument.Parse(stream);
+            using var doc = JsonDocument.Parse(stream, LenientJson);
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
             int Read(string key) => doc.RootElement.TryGetProperty(key, out var v) ? ReadInt(v, -1) : -1;
             return (Read("keyboard_timeout"), Read("keyboard_ac_timeout"));
@@ -78,7 +86,7 @@ public sealed class GHelperLevelSource : ILevelSource
                 try
                 {
                     using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    using var doc = JsonDocument.Parse(stream);
+                    using var doc = JsonDocument.Parse(stream, LenientJson);
                     if (doc.RootElement.ValueKind != JsonValueKind.Object) break;
 
                     var key = _onBattery() ? KeyBattery : KeyPluggedIn;
@@ -109,9 +117,10 @@ public sealed class GHelperLevelSource : ILevelSource
     private string? CachedConfigPath(Settings settings)
     {
         var now = Environment.TickCount64;
-        if (_cachedPath is null || now - _cachedAt > 60_000 || !File.Exists(_cachedPath))
+        if (_cachedPath is null || now - _cachedAt > 60_000 || !File.Exists(_cachedPath) || _cachedFor != settings.GHelperConfigPath)
         {
             _cachedPath = ResolveConfigPath(settings);
+            _cachedFor = settings.GHelperConfigPath;
             _cachedAt = now;
         }
         return _cachedPath;

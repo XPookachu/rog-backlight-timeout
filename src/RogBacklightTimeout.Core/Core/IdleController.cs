@@ -69,16 +69,13 @@ public sealed class IdleController : IDisposable
     public bool IsDimmed { get { lock (_gate) return _state == KeyboardState.Dark; } }
 
     /// <summary>
-    /// Call once when the agent starts: if a previous instance was killed while the keyboard was dark,
-    /// bring the light back to the level G-Helper wants.
+    /// Call once when the agent starts. A previous instance may have been killed while the keyboard was dark, so the
+    /// state is unknown: nothing is written now (the lid state is not known yet, and a failed write could not be
+    /// retried); the first built-in input restores the light, retrying until the write succeeds.
     /// </summary>
     public void Start()
     {
-        lock (_gate)
-        {
-            var level = SafeLevel();
-            if (level > 0) TrySet(level, "startup");
-        }
+        lock (_gate) _state = KeyboardState.Unknown;
     }
 
     /// <summary>Keyboard / touchpad activity from a built-in device.</summary>

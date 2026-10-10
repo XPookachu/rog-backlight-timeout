@@ -6,6 +6,9 @@ namespace RogBacklightTimeout;
 /// <summary>The long-running per-user background process (started by Task Scheduler at logon). Also the composition root.</summary>
 internal static class Agent
 {
+    private const int ProbeRetries = 24;
+    private static readonly TimeSpan ProbeRetryInterval = TimeSpan.FromSeconds(5);
+
     public static int Run()
     {
         using var singleInstance = CreateMutex(out var isFirst);
@@ -19,20 +22,29 @@ internal static class Agent
 
         var platform = RogPlatform.Read();
         var backlight = new RogBacklight(platform);
+        using var reload = CreateEvent(AppPaths.ReloadEventName);
+        using var stop = CreateEvent(AppPaths.StopEventName);
+
         var probe = backlight.Probe();
         log.Info($"System: {platform}; backlight {probe}");
+
+        // The controller may not be enumerated yet right after logon. Task Scheduler does not restart a task that
+        // merely exits with a non-zero code, so retry here for a while before giving up.
+        for (var attempt = 1; !probe.Supported && probe.Retryable && attempt <= ProbeRetries; attempt++)
+        {
+            if (stop.WaitOne(ProbeRetryInterval)) return 0;
+            probe = backlight.Probe();
+            if (probe.Supported) log.Info($"Backlight controller found after {attempt} retr{(attempt == 1 ? "y" : "ies")}: {probe}");
+        }
+
         if (!probe.Supported)
         {
-            // Retryable: the controller may not be enumerated yet at logon; a non-zero exit lets the task restart us.
             log.Info("Nothing to control right now; exiting.");
             return probe.Retryable ? 3 : 0;
         }
 
         var settings = SettingsStore.Load();
         Settings Current() => Volatile.Read(ref settings);
-
-        using var reload = CreateEvent(AppPaths.ReloadEventName);
-        using var stop = CreateEvent(AppPaths.StopEventName);
 
         var levels = new GHelperLevelSource(Current, PowerStatus.IsOnBattery, log);
         using var controller = new IdleController(backlight, levels, TimeProvider.System, Current, log);
@@ -47,7 +59,7 @@ internal static class Agent
         var monitor = new InputMonitor(classifier,
             (path, verdict) => log.Info($"Input device seen: {(verdict.IsInternal ? "INTERNAL" : "external")} ({verdict.Describe()}) {path}"));
 
-        using var window = new MessageWindow();
+        using var window = new MessageWindow(log.Info);
         window.RawInput += device => { if (monitor.IsInternal(device)) controller.OnInternalInput(); };
         window.DevicesChanged += () => { classifier.Refresh(); monitor.Invalidate(); };
         window.Resumed += () => controller.OnSystemEvent("resume");
