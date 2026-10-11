@@ -10,12 +10,12 @@ brightness and lighting effects and only adds the "who counts as activity" part.
 
 ## Use
 
-Download `RogBacklightTimeout.exe` from [Releases](../../releases) and double-click it. That's the whole program: no runtime
+Download the zip from [Releases](../../releases), extract it and double-click `RogBacklightTimeout.exe`. That's the whole program: no runtime
 or installer needed. Choose **Install (start at logon)** once (it asks for administrator approval); after that the
 background agent starts with Windows and you only open the exe to change settings.
 
 ```
-  ROG Backlight Timeout                                   v1.0.3
+  ROG Backlight Timeout                                   v1.0.4
   Keyboard backlight timeout for ROG laptops · built-in input only
 
   ──────────────────────────────────────────────────────────────
@@ -113,5 +113,7 @@ hardware) and extend the table test. Classifier fixtures come from the *Input de
 
 ## Licence
 
-GPL-3.0-or-later, see [LICENSE](LICENSE). The code follows [G-Helper](https://github.com/seerge/g-helper) (GPL-3.0)
-closely in places; attribution is in [NOTICE.md](NOTICE.md). Not affiliated with ASUS.
+GPL-3.0-only, see [LICENSE](LICENSE). The code follows [G-Helper](https://github.com/seerge/g-helper) (GPL-3.0-only)
+closely in places; attribution is in [NOTICE.md](NOTICE.md) and bundled third-party licences are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The release download is a zip that includes these files; keep them
+with the exe. Not affiliated with ASUS.
