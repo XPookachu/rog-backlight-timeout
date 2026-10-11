@@ -195,6 +195,9 @@ internal static unsafe class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
 
+    [DllImport("kernel32.dll")]
+    public static extern uint WTSGetActiveConsoleSessionId();
+
     // ---- files ----
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

@@ -27,8 +27,7 @@ public static class Installer
 
             Directory.CreateDirectory(AppPaths.InstallDir);
             DeleteObsoleteFiles();
-            if (!SamePath(sourceExe, AppPaths.InstalledExe))
-                Retry(() => File.Copy(sourceExe, AppPaths.InstalledExe, overwrite: true));
+            if (!SamePath(sourceExe, AppPaths.InstalledExe)) ReplaceInstalledExe(sourceExe);
 
             using var identity = WindowsIdentity.GetCurrent();
             // The task definition is written into the install folder (administrators only), not the user-writable temp folder.
@@ -87,16 +86,7 @@ public static class Installer
             try { Retry(() => File.Delete(file), attempts: 5); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                var obsolete = $"{file}.{Guid.NewGuid():N}{ObsoleteSuffix}";
-                try
-                {
-                    File.Move(file, obsolete);
-                    ScheduleDeleteAtReboot(obsolete);
-                }
-                catch (Exception moveError) when (moveError is IOException or UnauthorizedAccessException)
-                {
-                    ScheduleDeleteAtReboot(file); // cannot rename either: nothing safer left
-                }
+                MoveAside(file); // if even this fails the exception ends the uninstall: the file is left alone and reported
                 deferred = true;
             }
         }
@@ -113,6 +103,28 @@ public static class Installer
 
     // Note: once the running exe has been renamed, assemblies that were not loaded yet can no longer be read from the
     // single-file bundle. Keep this path to types that are already in use (no Marshal.GetLastWin32Error here).
+    /// <summary>
+    /// Installing over a copy that is still in use (a second menu window open from the installed exe): move it out of the
+    /// way and write the new one.
+    /// </summary>
+    private static void ReplaceInstalledExe(string sourceExe)
+    {
+        try { Retry(() => File.Copy(sourceExe, AppPaths.InstalledExe, overwrite: true), attempts: 5); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && File.Exists(AppPaths.InstalledExe))
+        {
+            MoveAside(AppPaths.InstalledExe);
+            File.Copy(sourceExe, AppPaths.InstalledExe, overwrite: false);
+        }
+    }
+
+    /// <summary>Renames an in-use file to a unique name and schedules that name (never the original path) for deletion at restart.</summary>
+    private static void MoveAside(string file)
+    {
+        var obsolete = $"{file}.{Guid.NewGuid():N}{ObsoleteSuffix}";
+        File.Move(file, obsolete);
+        ScheduleDeleteAtReboot(obsolete);
+    }
+
     private static void ScheduleDeleteAtReboot(string path)
     {
         if (!Native.MoveFileExW(path, null, Native.MOVEFILE_DELAY_UNTIL_REBOOT))

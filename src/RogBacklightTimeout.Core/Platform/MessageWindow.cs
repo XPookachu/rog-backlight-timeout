@@ -28,6 +28,7 @@ internal sealed unsafe class MessageWindow : IDisposable
     private IntPtr _lidNotification;
     private IntPtr _powerSourceNotification;
     private bool _sessionNotification;
+    private bool _onConsole = true;
 
     private readonly Action<string>? _warn;
 
@@ -101,6 +102,8 @@ internal sealed unsafe class MessageWindow : IDisposable
         if (_powerSourceNotification == IntPtr.Zero) _warn?.Invoke($"Could not register for power source notifications (error {Marshal.GetLastWin32Error()})");
         _sessionNotification = Native.WTSRegisterSessionNotification(_hwnd, Native.NOTIFY_FOR_THIS_SESSION);
         if (!_sessionNotification) _warn?.Invoke($"Could not register for session notifications (error {Marshal.GetLastWin32Error()})");
+
+        CheckConsole(); // started inside a remote session or while another user holds the console
 
         // Work queued before the window existed.
         if (!_posted.IsEmpty) Native.PostMessageW(_hwnd, Native.WM_APP, IntPtr.Zero, IntPtr.Zero);
@@ -186,19 +189,33 @@ internal sealed unsafe class MessageWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// True when this session is the one at the physical keyboard. 0xFFFFFFFF means no session is attached to the
+    /// console right now (e.g. mid-switch), which is also "not ours".
+    /// </summary>
+    internal static bool IsOnConsole(uint consoleSession, uint ownSession) =>
+        consoleSession != 0xFFFFFFFF && consoleSession == ownSession;
+
+    private static bool OnConsoleNow() =>
+        IsOnConsole(Native.WTSGetActiveConsoleSessionId(), (uint)System.Diagnostics.Process.GetCurrentProcess().SessionId);
+
+    /// <summary>
+    /// Connect/disconnect messages only say that something changed; the console owner is looked up each time, so a
+    /// remote connect no longer counts as "got the console back". Raised only when the answer changes.
+    /// </summary>
     private void HandleSessionChange(int reason)
     {
-        switch (reason)
-        {
-            case Native.WTS_CONSOLE_DISCONNECT:
-            case Native.WTS_REMOTE_DISCONNECT:
-                SessionDisconnected?.Invoke(true);
-                break;
-            case Native.WTS_CONSOLE_CONNECT:
-            case Native.WTS_REMOTE_CONNECT:
-                SessionDisconnected?.Invoke(false);
-                break;
-        }
+        if (reason is not (Native.WTS_CONSOLE_CONNECT or Native.WTS_CONSOLE_DISCONNECT
+                           or Native.WTS_REMOTE_CONNECT or Native.WTS_REMOTE_DISCONNECT)) return;
+        CheckConsole();
+    }
+
+    private void CheckConsole()
+    {
+        var onConsole = OnConsoleNow();
+        if (onConsole == _onConsole) return;
+        _onConsole = onConsole;
+        SessionDisconnected?.Invoke(!onConsole);
     }
 
     private void Teardown()

@@ -40,7 +40,7 @@ public sealed class InputClassifier : IInputClassifier
     public Verdict Classify(string interfacePath)
     {
         var verdict = ClassifyStrict(interfacePath);
-        if (!_hasBuiltInKeyboard && verdict.Reason == VerdictReason.SeparateContainer)
+        if (!_hasBuiltInKeyboard && verdict.Reason is VerdictReason.SeparateContainer or VerdictReason.NoPnpInfo)
             return new Verdict(true, VerdictReason.FallbackNoBuiltInKeyboard);
         return verdict;
     }
@@ -55,7 +55,7 @@ public sealed class InputClassifier : IInputClassifier
         {
             _log.Info(found
                 ? "Built-in keyboard detected"
-                : "WARNING: no built-in keyboard detected; counting all hardware input until one appears (see 'doctor')");
+                : "WARNING: no built-in keyboard detected; counting all hardware input until one appears");
         }
         _hasBuiltInKeyboard = found;
     }

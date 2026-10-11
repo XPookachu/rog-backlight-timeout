@@ -80,6 +80,7 @@ internal static class Menu
                 selected = pick;
                 notice = null;
                 notice = items[pick].Run(shown => { notice = shown; Draw(); });
+                if (_quit) break; // do not touch anything else: the exe this process runs from may be gone
                 Console.Write(Ansi.ClearScreen); // actions may have used the whole screen
                 lastFrame = "";
                 Refresh();
@@ -176,7 +177,23 @@ internal static class Menu
         show(new Notice(Tone.Info, "Waiting for administrator approval…"));
         var (ok, message) = Program.Elevated.Request(install: false);
         source.InvalidateAutostart();
+
+        // This window runs from the file that was just removed: assemblies not loaded yet could no longer be read from it,
+        // so say goodbye and close instead of carrying on.
+        if (ok && RunsFromInstallFolder())
+        {
+            show(new Notice(Tone.Good, $"{message} Press any key to close."));
+            Console.ReadKey(intercept: true);
+            _quit = true;
+        }
         return new Notice(ok ? Tone.Good : Tone.Bad, message);
+    }
+
+    private static bool RunsFromInstallFolder()
+    {
+        var exe = Environment.ProcessPath;
+        return exe is not null
+            && Path.GetFullPath(exe).StartsWith(Path.GetFullPath(AppPaths.InstallDir) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Notice OpenLog()

@@ -15,7 +15,7 @@ or installer needed. Choose **Install (start at logon)** once (it asks for admin
 background agent starts with Windows and you only open the exe to change settings.
 
 ```
-  ROG Backlight Timeout                                   v1.0.2
+  ROG Backlight Timeout                                   v1.0.3
   Keyboard backlight timeout for ROG laptops · built-in input only
 
   ──────────────────────────────────────────────────────────────
@@ -108,8 +108,8 @@ hardware) and extend the table test. Classifier fixtures come from the *Input de
   use other mechanisms in G-Helper and are refused.
 - Touchpads that report as plain mice (non-precision) are not detected as activity; only keyboards and precision
   touchpads are. Detachable keyboards (e.g. ROG Flow Z13 folio) may need an `internalDeviceOverrides` entry.
-- Lid close, AC switch, resume and lock are handled; fast user switching is handled through session
-  connect/disconnect events.
+- Lid close, AC switch, resume and lock are handled; fast user switching and Remote Desktop are
+  handled by checking, on every session connect/disconnect, whether this session still owns the physical console.
 
 ## Licence
 

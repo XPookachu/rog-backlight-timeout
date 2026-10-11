@@ -21,7 +21,7 @@ public sealed record Settings
 
     /// <summary>
     /// Escape hatch for unusual hardware: case-insensitive substrings of a device path / instance ID that must
-    /// be treated as built-in even if automatic detection disagrees. Normally empty (see 'doctor').
+    /// be treated as built-in even if automatic detection disagrees. Normally empty (see the Input devices screen).
     /// </summary>
     public string[] InternalDeviceOverrides { get; init; } = [];
 

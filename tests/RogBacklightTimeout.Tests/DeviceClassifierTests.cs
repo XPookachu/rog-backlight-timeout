@@ -217,6 +217,17 @@ public sealed class InputClassifierTests
         Assert.False(classifier.Classify(@"\\?\HID#external").IsInternal);
     }
     [Fact]
+    public void Fallback_also_counts_devices_whose_lookup_failed()
+    {
+        var failed = @"\\?\HID#lookup-failed";
+        var classifier = new InputClassifier(() => DeviceOverrides.None, p => p == failed ? null : Facts(p, Peripheral), () => [@"\\?\HID#external", failed], new NullLog());
+        classifier.Refresh();
+
+        Assert.False(classifier.HasBuiltInKeyboard);
+        Assert.True(classifier.Classify(failed).IsInternal);
+    }
+
+    [Fact]
     public void Explicit_external_override_is_never_rescued_by_the_fallback()
     {
         var path = @"\\?\HID#VID_1A2C&PID_9400";
