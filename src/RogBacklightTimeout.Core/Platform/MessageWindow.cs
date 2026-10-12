@@ -13,7 +13,7 @@ namespace RogBacklightTimeout;
 /// messages (WM_POWERBROADCAST, WM_QUERYENDSESSION, WM_ENDSESSION).
 /// https://devblogs.microsoft.com/oldnewthing/20171218-00/?p=97595
 ///
-/// Privacy: only the Raw Input header is read. The agent never sees which key was pressed or any touch data.
+/// Privacy: only the Raw Input header is read. The agent never sees which key was pressed, any report contents or any touch data.
 /// The mouse usage is deliberately not registered: precision-touchpad cursor events arrive with a null device
 /// handle, and external mice would only generate noise. https://learn.microsoft.com/windows/win32/inputdev/raw-input
 /// </summary>
@@ -29,6 +29,7 @@ internal sealed unsafe class MessageWindow : IDisposable
     private IntPtr _powerSourceNotification;
     private bool _sessionNotification;
     private bool _onConsole = true;
+    private readonly HashSet<HidUsage> _listening = new();
 
     private readonly Action<string>? _warn;
 
@@ -39,7 +40,7 @@ internal sealed unsafe class MessageWindow : IDisposable
         _warn = warn;
     }
 
-    /// <summary>A keyboard or touchpad event; the argument is the Raw Input device handle (zero = injected/virtual).</summary>
+    /// <summary>A keyboard, touchpad or Fn-key event; the argument is the Raw Input device handle (zero = injected/virtual).</summary>
     public event Action<IntPtr>? RawInput;
 
     public event Action? DevicesChanged;
@@ -93,7 +94,7 @@ internal sealed unsafe class MessageWindow : IDisposable
         if (_hwnd == IntPtr.Zero)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateWindowEx failed");
 
-        RegisterRawInput();
+        ListenTo(InputSources.Always);
         // Registration failures are not fatal (input still works) but leave the lid, AC/battery or session safeguard
         // without events: log them.
         _lidNotification = Native.RegisterPowerSettingNotification(_hwnd, Native.LidSwitchStateChange, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
@@ -109,16 +110,31 @@ internal sealed unsafe class MessageWindow : IDisposable
         if (!_posted.IsEmpty) Native.PostMessageW(_hwnd, Native.WM_APP, IntPtr.Zero, IntPtr.Zero);
     }
 
-    private void RegisterRawInput()
+    /// <summary>
+    /// Receive these collections in addition to what is already registered. Only usages not registered before are sent
+    /// to Windows: registering again (even unchanged) makes Windows re-announce devices, which would raise
+    /// <see cref="DevicesChanged"/> and loop. Registrations are never removed: a collection that stops existing simply
+    /// stops producing events. Call on the message-loop thread, e.g. through <see cref="Post"/> before <see cref="Run"/>,
+    /// or from <see cref="DevicesChanged"/>.
+    /// </summary>
+    /// <returns>The usages that were newly registered.</returns>
+    public IReadOnlyList<HidUsage> ListenTo(IReadOnlyList<HidUsage> usages)
     {
+        var added = usages.Where(u => !_listening.Contains(u)).Distinct().ToArray();
+        if (_hwnd == IntPtr.Zero || added.Length == 0) return [];
+
         const uint flags = Native.RIDEV_INPUTSINK | Native.RIDEV_DEVNOTIFY;
-        var devices = stackalloc Native.RAWINPUTDEVICE[]
+        var devices = new Native.RAWINPUTDEVICE[added.Length];
+        for (var i = 0; i < devices.Length; i++)
+            devices[i] = new() { UsagePage = added[i].Page, Usage = added[i].Id, Flags = flags, Target = _hwnd };
+
+        fixed (Native.RAWINPUTDEVICE* p = devices)
         {
-            new() { UsagePage = 0x01, Usage = 0x06, Flags = flags, Target = _hwnd }, // keyboard
-            new() { UsagePage = 0x0D, Usage = 0x05, Flags = flags, Target = _hwnd }, // precision touchpad
-        };
-        if (!Native.RegisterRawInputDevices(devices, 2, (uint)sizeof(Native.RAWINPUTDEVICE)))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "RegisterRawInputDevices failed");
+            if (!Native.RegisterRawInputDevices(p, (uint)devices.Length, (uint)sizeof(Native.RAWINPUTDEVICE)))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "RegisterRawInputDevices failed");
+        }
+        _listening.UnionWith(added);
+        return added;
     }
 
     private IntPtr WindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)

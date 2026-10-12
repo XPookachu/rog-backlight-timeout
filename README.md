@@ -15,7 +15,7 @@ or installer needed. Choose **Install (start at logon)** once (it asks for admin
 background agent starts with Windows and you only open the exe to change settings.
 
 ```
-  ROG Backlight Timeout                                   v1.0.4
+  ROG Backlight Timeout                                   v1.0.5
   Keyboard backlight timeout for ROG laptops · built-in input only
 
   ──────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ two fight (the menu warns if it is on). To update, run the new exe and choose *R
 ## How it works
 
 ```
-Raw Input (keyboard + touchpad digitizer, header only)
+Raw Input (keyboard, touchpad digitizer, the keyboard's Fn-key collections; header only)
         |  which device? -> Plug and Play facts -> built-in or external?
         v
 IdleController (Active / Dimmed)  --timeout-->  brightness 0
@@ -59,6 +59,11 @@ IdleController (Active / Dimmed)  --timeout-->  brightness 0
   [`DeviceClassifier.cs`](src/RogBacklightTimeout.Core/Input/DeviceClassifier.cs). The *Input devices* screen shows the
   verdict for every keyboard and touchpad. If no keyboard looks built-in (unusual firmware), all hardware input counts
   instead of nothing.
+- **Fn keys count too.** One physical keyboard exposes several Raw Input collections: typing arrives on the standard one,
+  but the Fn row (power profile, screen brightness, ROG key, media keys) is reported by the keyboard's firmware on its
+  consumer-control and ASUS vendor-defined (usage page `0xFF31`) collections. The agent listens to those collections of the built-in
+  keyboard as well, so no key needs to be listed. Rule and tests in
+  [`InputSources.cs`](src/RogBacklightTimeout.Core/Input/InputSources.cs).
 - **Brightness uses G-Helper's own mechanism**: the HID feature report `5A BA C5 C4 <level>` sent to the ASUS Aura
   keyboard controller (see G-Helper `app/USB/AsusHid.cs` and `app/USB/Aura.cs`; the Linux `hid-asus` driver sends the
   same report). Only brightness changes, so your lighting mode and colours keep running and are simply hidden while
@@ -66,7 +71,7 @@ IdleController (Active / Dimmed)  --timeout-->  brightness 0
 - **Restore level** is read from G-Helper's `config.json` (`keyboard_brightness` while plugged in,
   `keyboard_brightness_ac` while on battery - G-Helper's naming is inverted), so Fn brightness changes just work.
   Changes G-Helper makes behind the agent's back (Fn keys, lid, AC switch, resume) are noticed and the agent re-syncs.
-- **Privacy**: only the Raw Input *header* is read. The agent never sees which key was pressed or any touch data and
+- **Privacy**: only the Raw Input *header* is read. The agent never sees which key was pressed, any report contents or any touch data and
   logs only state changes and device paths.
 - **Safety**: it writes only on an ASUS computer, only on models G-Helper also drives through this HID report (not
   ROG Ally, TUF, Vivobook, Zenbook, ProArt, ExpertBook), only to controllers whose USB product ID is in

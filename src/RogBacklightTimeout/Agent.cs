@@ -61,7 +61,22 @@ internal static class Agent
 
         using var window = new MessageWindow(log.Info);
         window.RawInput += device => { if (monitor.IsInternal(device)) controller.OnInternalInput(); };
-        window.DevicesChanged += () => { classifier.Refresh(); monitor.Invalidate(); };
+        // Fn-row keys arrive on other collections of the built-in keyboard (see InputSources): listen to those too.
+        // Runs once the window exists, and again whenever devices or the overrides change.
+        void ListenToKeyChannels()
+        {
+            try
+            {
+                var added = window.ListenTo(InputSources.Select(RawInputDevices.Enumerate(), path => classifier.Classify(path).IsInternal));
+                if (added.Count > 0) log.Info($"Listening to input collections: {string.Join(", ", added.Select(u => $"{u.Page:X4}/{u.Id:X2}"))}");
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                log.Info($"Could not listen to the keyboard's extra collections (Fn keys will not wake the backlight): {ex.Message}");
+            }
+        }
+        window.Post(ListenToKeyChannels);
+        window.DevicesChanged += () => { classifier.Refresh(); monitor.Invalidate(); ListenToKeyChannels(); };
         window.Resumed += () => controller.OnSystemEvent("resume");
         window.PowerSourceChanged += onBattery => controller.OnSystemEvent($"power source -> {(onBattery ? "battery" : "AC")}");
         window.LidChanged += controller.OnLid;
@@ -97,6 +112,7 @@ internal static class Agent
                         Volatile.Write(ref settings, SettingsStore.Load());
                         classifier.Refresh();
                         monitor.Invalidate();
+                        ListenToKeyChannels();
                         controller.OnSettingsChanged();
                         log.Info($"Config reloaded: enabled={Current().Enabled}, timeout={Current().TimeoutSeconds}s");
                     });
