@@ -22,6 +22,12 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishDocumentationFiles>false</PublishDocumentationFiles>
     <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
+    <!--
+      No lock file here: publishing adds SDK-implicit packages (the trimmer, Microsoft.NET.ILLink.Tasks) whose version
+      follows the installed SDK, and the runtime inside the exe should always come from the newest patched SDK anyway.
+      This project's package references (HidSharp, MinVer) are locked through RogBacklightTimeout.Core and the tests.
+    -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <!-- HidSharp is third-party and uses reflection internally: keep it whole and do not fail the build on its trim notice. -->
     <WarningsNotAsErrors>IL2104</WarningsNotAsErrors>
   </PropertyGroup>
