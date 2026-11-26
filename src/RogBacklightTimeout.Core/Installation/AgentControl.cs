@@ -1,8 +1,13 @@
-namespace RogBacklightTimeout;
+using System.Diagnostics;
+using RogBacklightTimeout.Core;
+
+namespace RogBacklightTimeout.Installation;
 
 /// <summary>Talks to the running agent through its named mutex and events (the agent grants the current user access).</summary>
-public static class AgentControl
+internal static class AgentControl
 {
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
+
     public static bool IsRunning()
     {
         var running = Mutex.TryOpenExisting(AppPaths.AgentMutexName, out var mutex);
@@ -22,11 +27,11 @@ public static class AgentControl
         if (!IsRunning()) return true;
         RequestStop();
 
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
+        var clock = Stopwatch.StartNew();
+        while (clock.Elapsed < timeout)
         {
             if (!IsRunning()) return true;
-            Thread.Sleep(100);
+            Thread.Sleep(PollInterval);
         }
         return !IsRunning();
     }

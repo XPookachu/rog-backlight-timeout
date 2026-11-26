@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Input;
 
 /// <summary>
 /// Reads Plug and Play facts for a Raw Input device path using CfgMgr32.
@@ -8,7 +8,7 @@ namespace RogBacklightTimeout;
 /// https://learn.microsoft.com/windows-hardware/drivers/install/devpkey-device-containerid
 /// https://learn.microsoft.com/windows-hardware/drivers/install/devpkey-device-removalpolicy
 /// </summary>
-internal static unsafe class PnpInspector
+internal static unsafe partial class PnpInspector
 {
     private const uint CrSuccess = 0;
     private const uint DevPropTypeInt32 = 0x00000006;
@@ -18,32 +18,11 @@ internal static unsafe class PnpInspector
     private const int MaxAncestors = 16;
     private const int BufferBytes = 1024;
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct DevPropKey
-    {
-        public Guid Fmtid;
-        public uint Pid;
-    }
+    private static readonly DevPropKey InstanceIdKey = new(new("78c34fc8-104a-4aca-9ea4-524d52996e57"), 256);
+    private static readonly DevPropKey ContainerIdKey = new(new("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c"), 2);
 
-    private static readonly DevPropKey InstanceIdKey = new() { Fmtid = new("78c34fc8-104a-4aca-9ea4-524d52996e57"), Pid = 256 };
-    private static readonly DevPropKey ContainerIdKey = new() { Fmtid = new("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c"), Pid = 2 };
-    // Keys verified against Windows itself (Get-PnpDeviceProperty reports {A45C254E-...} 33 for DEVPKEY_Device_RemovalPolicy).
-    private static readonly DevPropKey RemovalPolicyKey = new() { Fmtid = new("a45c254e-df1c-4efd-8020-67d146a850e0"), Pid = 33 };
-
-    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern uint CM_Get_Device_Interface_PropertyW(string interfacePath, in DevPropKey key, out uint type, byte* buffer, ref uint size, uint flags);
-
-    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern uint CM_Locate_DevNodeW(out uint devInst, string deviceId, uint flags);
-
-    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern uint CM_Get_DevNode_PropertyW(uint devInst, in DevPropKey key, out uint type, byte* buffer, ref uint size, uint flags);
-
-    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern uint CM_Get_Parent(out uint parent, uint devInst, uint flags);
-
-    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern uint CM_Get_Device_IDW(uint devInst, char* buffer, uint bufferLength, uint flags);
+    // Verified against Windows itself (Get-PnpDeviceProperty reports {A45C254E-...} 33 for DEVPKEY_Device_RemovalPolicy).
+    private static readonly DevPropKey RemovalPolicyKey = new(new("a45c254e-df1c-4efd-8020-67d146a850e0"), 33);
 
     /// <summary>Returns null only if the interface path cannot be resolved to a device at all.</summary>
     public static DeviceFacts? Inspect(string interfacePath)
@@ -81,7 +60,8 @@ internal static unsafe class PnpInspector
         return type == DevPropTypeString ? new string((char*)buffer) : null;
     }
 
-    private static T? ReadNode<T>(uint node, in DevPropKey key, uint expectedType, uint alternateType = 0) where T : unmanaged
+    private static T? ReadNode<T>(uint node, in DevPropKey key, uint expectedType, uint alternateType = 0)
+        where T : unmanaged
     {
         var buffer = stackalloc byte[BufferBytes];
         var size = (uint)BufferBytes;
@@ -95,4 +75,23 @@ internal static unsafe class PnpInspector
         var buffer = stackalloc char[BufferBytes / sizeof(char)];
         return CM_Get_Device_IDW(node, buffer, BufferBytes / sizeof(char), 0) == CrSuccess ? new string(buffer) : null;
     }
+
+    [LibraryImport("cfgmgr32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial uint CM_Get_Device_Interface_PropertyW(string interfacePath, in DevPropKey key, out uint type, byte* buffer, ref uint size, uint flags);
+
+    [LibraryImport("cfgmgr32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial uint CM_Locate_DevNodeW(out uint devInst, string deviceId, uint flags);
+
+    [LibraryImport("cfgmgr32.dll")]
+    private static partial uint CM_Get_DevNode_PropertyW(uint devInst, in DevPropKey key, out uint type, byte* buffer, ref uint size, uint flags);
+
+    [LibraryImport("cfgmgr32.dll")]
+    private static partial uint CM_Get_Parent(out uint parent, uint devInst, uint flags);
+
+    [LibraryImport("cfgmgr32.dll")]
+    private static partial uint CM_Get_Device_IDW(uint devInst, char* buffer, uint bufferLength, uint flags);
+
+    /// <summary>DEVPROPKEY.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct DevPropKey(Guid Fmtid, uint Pid);
 }

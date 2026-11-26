@@ -1,10 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using RogBacklightTimeout.Diagnostics;
+using RogBacklightTimeout.Input;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Core;
 
 /// <summary>User-editable agent configuration (config.json).</summary>
-public sealed record Settings
+internal sealed record Settings
 {
     public const int MinTimeoutSeconds = 5;
     public const int MaxTimeoutSeconds = 3600;
@@ -23,14 +25,18 @@ public sealed record Settings
     /// Escape hatch for unusual hardware: case-insensitive substrings of a device path / instance ID that must
     /// be treated as built-in even if automatic detection disagrees. Normally empty (see the Input devices screen).
     /// </summary>
-    public string[] InternalDeviceOverrides { get; init; } = [];
+    public IReadOnlyList<string> InternalDeviceOverrides { get; init; } = [];
 
     /// <summary>Substrings of device paths / instance IDs that must never count as built-in input.</summary>
-    public string[] ExternalDeviceOverrides { get; init; } = [];
+    public IReadOnlyList<string> ExternalDeviceOverrides { get; init; } = [];
 
     [JsonIgnore]
     public DeviceOverrides Overrides => new(InternalDeviceOverrides, ExternalDeviceOverrides);
 
+    [JsonIgnore]
+    public TimeSpan Timeout => TimeSpan.FromSeconds(TimeoutSeconds);
+
+    /// <summary>The same settings with every value in range (hand-edited files can contain anything).</summary>
     public Settings Normalized() => this with
     {
         TimeoutSeconds = Math.Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds),
@@ -40,7 +46,7 @@ public sealed record Settings
         ExternalDeviceOverrides = Clean(ExternalDeviceOverrides),
     };
 
-    private static string[] Clean(string[]? values) =>
+    private static string[] Clean(IReadOnlyList<string>? values) =>
         (values ?? []).Where(v => !string.IsNullOrWhiteSpace(v)).ToArray();
 }
 
@@ -49,9 +55,10 @@ public sealed record Settings
 [JsonSerializable(typeof(Settings))]
 internal sealed partial class SettingsJsonContext : JsonSerializerContext;
 
-public static class SettingsStore
+/// <summary>Loads and saves <see cref="Settings"/>. Loading never fails: a missing or broken file gives the defaults.</summary>
+internal static class SettingsStore
 {
-    public static Settings Load(string? path = null, ILog? log = null)
+    public static Settings Load(ILog log, string? path = null)
     {
         path ??= AppPaths.ConfigFile;
         try
@@ -65,17 +72,18 @@ public static class SettingsStore
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
-            (log ?? Log.Instance).Error($"Could not read config, using defaults: {ex.Message}");
+            log.Warning($"Could not read config, using defaults: {ex.Message}");
         }
         return new Settings().Normalized();
     }
 
+    /// <summary>Writes atomically (temporary file, then rename), so the agent never reads a half-written file.</summary>
     public static void Save(Settings settings, string? path = null)
     {
         path ??= AppPaths.ConfigFile;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var tmp = path + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(settings.Normalized(), SettingsJsonContext.Default.Settings));
-        File.Move(tmp, path, overwrite: true);
+        var temporary = path + ".tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(settings.Normalized(), SettingsJsonContext.Default.Settings));
+        File.Move(temporary, path, overwrite: true);
     }
 }

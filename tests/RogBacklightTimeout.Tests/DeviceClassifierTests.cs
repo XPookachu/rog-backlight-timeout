@@ -146,11 +146,6 @@ public sealed class DeviceClassifierTests
 
 public sealed class InputClassifierTests
 {
-    private sealed class NullLog : ILog
-    {
-        public void Info(string message) { }
-    }
-
     private static readonly Guid Peripheral = Guid.Parse("D811BC24-86CD-11F1-93C4-CE2A4CEC7264");
 
     private static DeviceFacts Facts(string path, Guid container) => new(path, path, container, null, [@"PCI\X\1"]);
@@ -159,7 +154,7 @@ public sealed class InputClassifierTests
     public void Without_any_built_in_keyboard_all_hardware_counts_instead_of_nothing()
     {
         var external = @"\\?\HID#VID_1A2C&PID_9400&MI_00#a";
-        var classifier = new InputClassifier(() => DeviceOverrides.None, p => Facts(p, Peripheral), () => [external], new NullLog());
+        var classifier = new InputClassifier(() => DeviceOverrides.None, p => Facts(p, Peripheral), () => [external], NullLog.Instance);
         classifier.Refresh();
 
         Assert.False(classifier.HasBuiltInKeyboard);
@@ -177,7 +172,7 @@ public sealed class InputClassifierTests
             () => DeviceOverrides.None,
             p => Facts(p, p == builtIn ? DeviceClassifier.LocalMachineContainer : Peripheral),
             () => [builtIn, external],
-            new NullLog());
+            NullLog.Instance);
         classifier.Refresh();
 
         Assert.True(classifier.HasBuiltInKeyboard);
@@ -189,7 +184,7 @@ public sealed class InputClassifierTests
     public void A_failed_or_empty_enumeration_keeps_the_previous_state()
     {
         var keyboards = new List<string> { @"\\?\HID#external" };
-        var classifier = new InputClassifier(() => DeviceOverrides.None, p => Facts(p, Peripheral), () => keyboards, new NullLog());
+        var classifier = new InputClassifier(() => DeviceOverrides.None, p => Facts(p, Peripheral), () => keyboards, NullLog.Instance);
         classifier.Refresh();
         Assert.False(classifier.HasBuiltInKeyboard);
 
@@ -206,7 +201,7 @@ public sealed class InputClassifierTests
         var classifier = new InputClassifier(
             () => DeviceOverrides.None,
             p => Facts(p, p.Contains("builtin") ? DeviceClassifier.LocalMachineContainer : Peripheral),
-            () => keyboards, new NullLog());
+            () => keyboards, NullLog.Instance);
         classifier.Refresh();
         Assert.True(classifier.Classify(@"\\?\HID#external").IsInternal); // fallback active
 
@@ -220,7 +215,7 @@ public sealed class InputClassifierTests
     public void Fallback_also_counts_devices_whose_lookup_failed()
     {
         var failed = @"\\?\HID#lookup-failed";
-        var classifier = new InputClassifier(() => DeviceOverrides.None, p => p == failed ? null : Facts(p, Peripheral), () => [@"\\?\HID#external", failed], new NullLog());
+        var classifier = new InputClassifier(() => DeviceOverrides.None, p => p == failed ? null : Facts(p, Peripheral), () => [@"\\?\HID#external", failed], NullLog.Instance);
         classifier.Refresh();
 
         Assert.False(classifier.HasBuiltInKeyboard);
@@ -231,7 +226,7 @@ public sealed class InputClassifierTests
     public void Explicit_external_override_is_never_rescued_by_the_fallback()
     {
         var path = @"\\?\HID#VID_1A2C&PID_9400";
-        var classifier = new InputClassifier(() => new DeviceOverrides([], ["VID_1A2C"]), p => Facts(p, Peripheral), () => [path], new NullLog());
+        var classifier = new InputClassifier(() => new DeviceOverrides([], ["VID_1A2C"]), p => Facts(p, Peripheral), () => [path], NullLog.Instance);
         classifier.Refresh();
 
         Assert.False(classifier.Classify(path).IsInternal);

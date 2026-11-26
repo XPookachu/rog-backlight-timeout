@@ -1,9 +1,12 @@
 using System.Runtime.InteropServices;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Platform;
 
-/// <summary>The Win32 surface the agent uses. Everything else is managed code.</summary>
-internal static unsafe class Native
+/// <summary>
+/// The Win32 surface the agent uses (source-generated P/Invoke). Names follow the Windows SDK headers so they can be
+/// looked up directly; everything else in the program is managed code.
+/// </summary>
+internal static unsafe partial class Native
 {
     // Window messages
     public const uint WM_CLOSE = 0x0010;
@@ -42,6 +45,9 @@ internal static unsafe class Native
     public const uint NOTIFY_FOR_THIS_SESSION = 0;
     public const uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004;
 
+    /// <summary>Returned by the Raw Input functions on failure ((UINT)-1).</summary>
+    public const uint RawInputError = uint.MaxValue;
+
     /// <summary>GUID_LIDSWITCH_STATE_CHANGE: data 0 = closed, 1 = open.</summary>
     public static readonly Guid LidSwitchStateChange = new("BA3E0F4D-B817-4094-A2D1-D56379E6A0F3");
 
@@ -50,7 +56,7 @@ internal static unsafe class Native
 
     public delegate IntPtr WndProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Sequential)]
     public struct WNDCLASSEXW
     {
         public uint cbSize;
@@ -105,6 +111,37 @@ internal static unsafe class Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct RID_DEVICE_INFO_HID
+    {
+        public uint VendorId;
+        public uint ProductId;
+        public uint VersionNumber;
+        public ushort UsagePage;
+        public ushort Usage;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RID_DEVICE_INFO_KEYBOARD
+    {
+        public uint Type;
+        public uint SubType;
+        public uint KeyboardMode;
+        public uint NumberOfFunctionKeys;
+        public uint NumberOfIndicators;
+        public uint NumberOfKeysTotal;
+    }
+
+    /// <summary>RID_DEVICE_INFO: the union is as large as its largest member (the keyboard part), 32 bytes in all.</summary>
+    [StructLayout(LayoutKind.Explicit)]
+    public struct RID_DEVICE_INFO
+    {
+        [FieldOffset(0)] public uint cbSize;
+        [FieldOffset(4)] public uint Type;
+        [FieldOffset(8)] public RID_DEVICE_INFO_HID Hid;
+        [FieldOffset(8)] public RID_DEVICE_INFO_KEYBOARD Keyboard;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct POWERBROADCAST_SETTING
     {
         public Guid PowerSetting;
@@ -125,82 +162,86 @@ internal static unsafe class Native
 
     // ---- windowing ----
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern ushort RegisterClassExW(in WNDCLASSEXW windowClass);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial ushort RegisterClassExW(in WNDCLASSEXW windowClass);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern IntPtr CreateWindowExW(uint exStyle, string className, string windowName, uint style,
+    [LibraryImport("user32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool UnregisterClassW(string className, IntPtr instance);
+
+    [LibraryImport("user32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    public static partial IntPtr CreateWindowExW(uint exStyle, string className, string windowName, uint style,
         int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
 
-    [DllImport("user32.dll")]
-    public static extern IntPtr DefWindowProcW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr DefWindowProcW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern int GetMessageW(out MSG message, IntPtr hwnd, uint filterMin, uint filterMax);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial int GetMessageW(out MSG message, IntPtr hwnd, uint filterMin, uint filterMax);
 
-    [DllImport("user32.dll")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool TranslateMessage(in MSG message);
+    public static partial bool TranslateMessage(in MSG message);
 
-    [DllImport("user32.dll")]
-    public static extern IntPtr DispatchMessageW(in MSG message);
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr DispatchMessageW(in MSG message);
 
-    [DllImport("user32.dll")]
-    public static extern void PostQuitMessage(int exitCode);
+    [LibraryImport("user32.dll")]
+    public static partial void PostQuitMessage(int exitCode);
 
-    [DllImport("user32.dll")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool PostMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    public static partial bool PostMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
-    [DllImport("user32.dll")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool DestroyWindow(IntPtr hwnd);
+    public static partial bool DestroyWindow(IntPtr hwnd);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr GetModuleHandleW(string? moduleName);
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial IntPtr GetModuleHandleW(string? moduleName);
 
     // ---- raw input ----
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool RegisterRawInputDevices(RAWINPUTDEVICE* devices, uint count, uint size);
+    public static partial bool RegisterRawInputDevices(RAWINPUTDEVICE* devices, uint count, uint size);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint GetRawInputData(IntPtr rawInput, uint command, void* data, ref uint size, uint headerSize);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial uint GetRawInputData(IntPtr rawInput, uint command, void* data, ref uint size, uint headerSize);
 
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    public static extern uint GetRawInputDeviceInfoW(IntPtr device, uint command, void* data, ref uint size);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial uint GetRawInputDeviceInfoW(IntPtr device, uint command, void* data, ref uint size);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint GetRawInputDeviceList(RAWINPUTDEVICELIST* list, ref uint count, uint size);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial uint GetRawInputDeviceList(RAWINPUTDEVICELIST* list, ref uint count, uint size);
 
     // ---- power / session ----
 
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr RegisterPowerSettingNotification(IntPtr recipient, in Guid powerSetting, int flags);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial IntPtr RegisterPowerSettingNotification(IntPtr recipient, in Guid powerSetting, int flags);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool UnregisterPowerSettingNotification(IntPtr handle);
+    public static partial bool UnregisterPowerSettingNotification(IntPtr handle);
 
-    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [LibraryImport("wtsapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool WTSRegisterSessionNotification(IntPtr hwnd, uint flags);
+    public static partial bool WTSRegisterSessionNotification(IntPtr hwnd, uint flags);
 
-    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [LibraryImport("wtsapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool WTSUnRegisterSessionNotification(IntPtr hwnd);
+    public static partial bool WTSUnRegisterSessionNotification(IntPtr hwnd);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
+    public static partial bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
 
-    [DllImport("kernel32.dll")]
-    public static extern uint WTSGetActiveConsoleSessionId();
+    [LibraryImport("kernel32.dll")]
+    public static partial uint WTSGetActiveConsoleSessionId();
 
     // ---- files ----
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool MoveFileExW(string existingFileName, string? newFileName, uint flags);
+    public static partial bool MoveFileExW(string existingFileName, string? newFileName, uint flags);
 }

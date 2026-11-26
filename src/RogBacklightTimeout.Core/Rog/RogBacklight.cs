@@ -1,10 +1,14 @@
 using HidSharp;
 using HidSharp.Reports;
+using RogBacklightTimeout.Core;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Rog;
 
+/// <summary>Whether this computer has a backlight the agent may control.</summary>
+/// <param name="Supported">A supported controller was found.</param>
+/// <param name="Detail">What was found, or why nothing is supported.</param>
 /// <param name="Retryable">Unsupported right now but may work later (the controller may simply not be enumerated yet at logon).</param>
-public readonly record struct ProbeResult(bool Supported, string Detail, bool Retryable = false)
+internal readonly record struct ProbeResult(bool Supported, string Detail, bool Retryable = false)
 {
     public override string ToString() => $"{(Supported ? "supported" : "NOT supported")}: {Detail}";
 }
@@ -21,7 +25,7 @@ public readonly record struct ProbeResult(bool Supported, string Detail, bool Re
 /// <see cref="RogAuraProducts"/> and (c) which expose feature report 0x5A in their report descriptor.
 /// The payload bytes are constants; configuration can never change them.
 /// </summary>
-public sealed class RogBacklight : IBacklight
+internal sealed class RogBacklight : IBacklight
 {
     private const byte InputReportId = 0x5A;
     private const int MaxLevel = 3;

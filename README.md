@@ -15,7 +15,7 @@ or installer needed. Choose **Install (start at logon)** once (it asks for admin
 background agent starts with Windows and you only open the exe to change settings.
 
 ```
-  ROG Backlight Timeout                                   v1.0.5
+  ROG Backlight Timeout                                   v1.1.0
   Keyboard backlight timeout for ROG laptops · built-in input only
 
   ──────────────────────────────────────────────────────────────
@@ -35,8 +35,13 @@ background agent starts with Windows and you only open the exe to change setting
     8  Quit
 ```
 
-The exe is unsigned, so SmartScreen may warn. In G-Helper, make sure its own keyboard timeout is **Off**, otherwise the
-two fight (the menu warns if it is on). To update, run the new exe and choose *Reinstall / update*.
+In G-Helper, make sure its own keyboard timeout is **Off**, otherwise the two fight (the menu warns if it is on). To
+update, run the new exe and choose *Reinstall / update*.
+
+The exe is unsigned, so SmartScreen may warn. Every release is built by GitHub Actions from its tag and carries a
+signed build-provenance attestation. To check a download:
+`gh attestation verify RogBacklightTimeout-vX.Y.Z.zip -R XPookachu/rog-backlight-timeout` (the SHA-256 sums are in
+the release notes and in `BUILD-INFO.txt` inside the zip).
 
 ## How it works
 
@@ -79,9 +84,13 @@ IdleController (Active / Dimmed)  --timeout-->  brightness 0
   bytes are constants; configuration cannot change them. If nothing supported is found (after retrying for about two minutes, since the controller can appear late at logon) the agent exits.
 - The agent restores the light when it stops, at session end, and on the first keypress after a crash. It runs elevated
   because Windows hides keyboard input from non-elevated background programs while an elevated window has focus, which
-  is why it is installed under `%ProgramFiles%` (administrator-writable only).
+  is why it is installed under `%ProgramFiles%` (administrator-writable only). For the same reason it never writes into
+  the user's own folders: its log lives in `%ProgramData%\RogBacklightTimeout`, a folder it creates so that only
+  administrators can write it (and replaces if anyone else made or redirected it). See
+  [`SecureDirectory.cs`](src/RogBacklightTimeout.Core/Platform/SecureDirectory.cs).
 
-Settings and the log live in `%LOCALAPPDATA%\RogBacklightTimeout` (`config.json`, `log.txt`). `config.json` also has
+Settings live in `%LOCALAPPDATA%\RogBacklightTimeout\config.json`; the agent's log is
+`%ProgramData%\RogBacklightTimeout\log.txt` (*Open log* in the menu shows it). `config.json` also has
 `fallbackLevel`, `gHelperConfigPath`, and the escape hatches `internalDeviceOverrides` / `externalDeviceOverrides`
 (case-insensitive substrings of a device path or instance ID, for unusual hardware).
 
@@ -92,20 +101,48 @@ should be installed: it owns the brightness setting.
 
 ## Build
 
-Needs the .NET 10 SDK.
+Needs the .NET 10 SDK (pinned in `global.json`).
 
 ```powershell
-.\scripts\publish.ps1     # runs the tests, writes dist\RogBacklightTimeout.exe (self-contained, single file, ~11 MB)
+dotnet test --solution RogBacklightTimeout.slnx   # unit tests (xUnit v3)
+.\scripts\publish.ps1                             # tests, then dist\RogBacklightTimeout.exe and the release zip
 ```
 
 | Project | Role |
 | --- | --- |
-| `src/RogBacklightTimeout.Core` | library: state machine, settings, Win32 message window, Plug and Play inspection, classifier, ROG backlight, autostart/installer |
-| `src/RogBacklightTimeout` | the executable: menu, agent, composition root |
+| `src/RogBacklightTimeout.Core` | library, one namespace per folder: `Core` (idle state machine, settings), `Input` (Raw Input, Plug and Play, built-in classifier), `Rog` (backlight controller), `Integrations` (G-Helper), `Platform` (Win32 message window, interop, secure folder), `Installation` (installer, logon task, agent control), `Diagnostics` (log) |
+| `src/RogBacklightTimeout` | the executable: menu, agent, elevation, composition root |
 | `tests/RogBacklightTimeout.Tests` | unit tests (fake clock; classifier fixtures are real devices captured with `Get-PnpDeviceProperty`) |
+
+Builds are reproducible and strict: central package versions with committed lock files (CI restores in locked mode),
+.NET analyzers at `latest-recommended` and the `.editorconfig` style rules enforced in the build, warnings as errors,
+and `dotnet format --verify-no-changes` in CI.
 
 Adding a model: add its controller's product ID to `RogAuraProducts` (only after it is verified in G-Helper or on
 hardware) and extend the table test. Classifier fixtures come from the *Input devices* screen; add yours.
+
+## Releases
+
+The version comes from the git tag (MinVer), so a release is a tag: write the release notes as the body of an
+annotated tag and push it.
+
+```powershell
+git tag -a v1.2.3 -m "v1.2.3: one-line summary" -m "What changed, for the release notes."
+git push origin v1.2.3
+```
+
+CI then builds and tests that commit, attests the exe and the zip, and publishes the GitHub release with the zip,
+`SHA256SUMS` and the notes. Every other CI run keeps the same files as a downloadable `release` artifact.
+
+Installing, elevation and the hardware cannot run in CI, so before tagging, on a ROG laptop with the CI-built exe:
+
+1. *Reinstall / update* over the previous version: the menu shows the new version, the agent running and autostart
+   installed; `%ProgramData%\RogBacklightTimeout\log.txt` shows the new version starting.
+2. Leave the built-in keyboard alone for the timeout: the backlight goes off. Type on it, or press an Fn key: it comes
+   back. An external keyboard or mouse does neither.
+3. *Stop agent*: the backlight comes back on. *Start agent*, then sign out and in: the agent starts by itself.
+4. *Uninstall* from the installed copy and from a downloaded copy: the task, `%ProgramFiles%\RogBacklightTimeout` and
+   the log folder are gone, `config.json` is kept.
 
 ## Limits
 

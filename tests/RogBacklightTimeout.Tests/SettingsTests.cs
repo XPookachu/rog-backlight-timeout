@@ -2,10 +2,6 @@ namespace RogBacklightTimeout.Tests;
 
 public sealed class SettingsTests
 {
-    private sealed class SilentLog : ILog
-    {
-        public void Info(string message) { }
-    }
 
     [Fact]
     public void Timeout_and_level_are_clamped()
@@ -30,13 +26,13 @@ public sealed class SettingsTests
         try
         {
             SettingsStore.Save(new Settings { Enabled = false, TimeoutSeconds = 45, InternalDeviceOverrides = ["X"] }, path);
-            var loaded = SettingsStore.Load(path);
+            var loaded = SettingsStore.Load(NullLog.Instance, path);
             Assert.False(loaded.Enabled);
             Assert.Equal(45, loaded.TimeoutSeconds);
             Assert.Equal(["X"], loaded.InternalDeviceOverrides);
 
             File.WriteAllText(path, "{ not json");
-            Assert.True(SettingsStore.Load(path, new SilentLog()).Enabled); // defaults, and nothing is written to the real log
+            Assert.True(SettingsStore.Load(NullLog.Instance, path).Enabled); // defaults, and nothing is written to the real log
         }
         finally { File.Delete(path); }
     }
@@ -61,7 +57,7 @@ public sealed class SettingsTests
         try
         {
             File.WriteAllText(path, """{ "timeoutSeconds": 12, "internalDevicePatterns": ["VID_0B05&PID_19B6"] }""");
-            Assert.Equal(12, SettingsStore.Load(path).TimeoutSeconds);
+            Assert.Equal(12, SettingsStore.Load(NullLog.Instance, path).TimeoutSeconds);
         }
         finally { File.Delete(path); }
     }
@@ -98,17 +94,12 @@ public sealed class RogAuraProductsTests
 
 public sealed class GHelperLevelSourceTests : IDisposable
 {
-    private sealed class NullLog : ILog
-    {
-        public void Info(string message) { }
-    }
-
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"gh-{Guid.NewGuid():N}.json");
 
     public void Dispose() => File.Delete(_path);
 
     private GHelperLevelSource Source(bool onBattery, int fallback = 2) =>
-        new(() => new Settings { GHelperConfigPath = _path, FallbackLevel = fallback }, () => onBattery, new NullLog());
+        new(() => new Settings { GHelperConfigPath = _path, FallbackLevel = fallback }, () => onBattery, NullLog.Instance);
 
     [Fact]
     public void Uses_the_plugged_in_key_on_ac_and_the_ac_suffixed_key_on_battery()
@@ -184,7 +175,7 @@ public sealed class GHelperLevelSourceTests : IDisposable
             File.WriteAllText(_path, """{ "keyboard_brightness": 3 }""");
             File.WriteAllText(other, """{ "keyboard_brightness": 1 }""");
             var settings = new Settings { GHelperConfigPath = _path };
-            var source = new GHelperLevelSource(() => settings, () => false, new NullLog());
+            var source = new GHelperLevelSource(() => settings, () => false, NullLog.Instance);
 
             Assert.Equal(3, source.GetRestoreLevel());
 

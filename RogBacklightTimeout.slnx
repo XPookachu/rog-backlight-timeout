@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RogBacklightTimeout.Core/RogBacklightTimeout.Core.csproj" />
+    <Project Path="src/RogBacklightTimeout/RogBacklightTimeout.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RogBacklightTimeout.Tests/RogBacklightTimeout.Tests.csproj" />
+  </Folder>
+</Solution>

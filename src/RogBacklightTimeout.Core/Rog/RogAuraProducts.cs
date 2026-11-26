@@ -1,4 +1,4 @@
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Rog;
 
 /// <summary>
 /// USB product IDs (vendor 0x0B05, ASUS) of ROG/ASUS "Aura" keyboard controllers whose backlight brightness can
@@ -16,7 +16,7 @@ namespace RogBacklightTimeout;
 /// To add a model: add its product ID here and a row to the table test. Never add an ID that has not been
 /// verified in G-Helper (or on real hardware): the agent only ever writes to IDs listed here.
 /// </summary>
-public static class RogAuraProducts
+internal static class RogAuraProducts
 {
     public const int AsusVendorId = 0x0B05;
 

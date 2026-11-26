@@ -1,14 +1,16 @@
 using System.Diagnostics;
 using System.Text.Json;
+using RogBacklightTimeout.Core;
+using RogBacklightTimeout.Diagnostics;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Integrations;
 
 /// <summary>
 /// Reads the brightness G-Helper is configured to use, so the agent stays in sync with it.
 /// Mirrors G-Helper's InputDispatcher.GetBacklight(): plugged in -> "keyboard_brightness",
 /// on battery -> "keyboard_brightness_ac" (sic). Only read when dimming/restoring.
 /// </summary>
-public sealed class GHelperLevelSource : ILevelSource
+internal sealed class GHelperLevelSource : ILevelSource
 {
     private const string KeyPluggedIn = "keyboard_brightness";
     private const string KeyBattery = "keyboard_brightness_ac";
@@ -34,6 +36,9 @@ public sealed class GHelperLevelSource : ILevelSource
         _onBattery = onBattery;
         _log = log;
     }
+
+    /// <summary>G-Helper's config file, or null when none was found (briefly cached).</summary>
+    public string? ConfigPath => CachedConfigPath(_settings());
 
     public long Stamp
     {
@@ -102,7 +107,7 @@ public sealed class GHelperLevelSource : ILevelSource
             // fall through to the fallback below
         }
 
-        _log.Info($"Could not read G-Helper config, using fallback level {settings.FallbackLevel}");
+        _log.Warning($"Could not read G-Helper config, using fallback level {settings.FallbackLevel}");
         return settings.FallbackLevel;
     }
 
