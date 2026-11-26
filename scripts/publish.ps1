@@ -29,7 +29,7 @@ if (-not $SkipTests) {
 }
 
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
-Invoke-DotNet publish (Join-Path $root 'src\RogBacklightTimeout\RogBacklightTimeout.csproj') -c Release -nologo -v:q -o $out
+Invoke-DotNet publish (Join-Path $root 'src\RogBacklightTimeout\RogBacklightTimeout.csproj') -c Release --nologo --verbosity quiet -o $out
 
 $exe = Join-Path $out 'RogBacklightTimeout.exe'
 $version = ((Get-Item $exe).VersionInfo.ProductVersion -split '\+')[0]
