@@ -7,26 +7,13 @@ namespace RogBacklightTimeout.Ui;
 /// Gives the GUI-subsystem executable a console window for the menu (the agent never calls this, so it never flashes
 /// a window) and switches it to UTF-8 with ANSI colour processing.
 /// </summary>
-internal static class ConsoleHost
+internal static partial class ConsoleHost
 {
     private const int StdOutputHandle = -11;
     private const uint EnableProcessedOutput = 0x0001;
     private const uint EnableVirtualTerminalProcessing = 0x0004;
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool AllocConsole();
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetStdHandle(int handle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetConsoleMode(IntPtr handle, out uint mode);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetConsoleMode(IntPtr handle, uint mode);
+    private const int MinWidth = 74;
+    private const int MinHeight = 30;
 
     public static void Open(string title)
     {
@@ -38,7 +25,28 @@ internal static class ConsoleHost
 
         Console.OutputEncoding = new UTF8Encoding(false);
         Console.Title = title;
-        try { Console.SetWindowSize(Math.Max(Console.WindowWidth, 74), Math.Max(Console.WindowHeight, 30)); }
-        catch (Exception ex) when (ex is IOException or ArgumentException or PlatformNotSupportedException) { /* e.g. hosted terminal: keep its size */ }
+        try
+        {
+            Console.SetWindowSize(Math.Max(Console.WindowWidth, MinWidth), Math.Max(Console.WindowHeight, MinHeight));
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or PlatformNotSupportedException)
+        {
+            // A hosted terminal (Windows Terminal) keeps its own size.
+        }
     }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AllocConsole();
+
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr GetStdHandle(int handle);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetConsoleMode(IntPtr handle, out uint mode);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetConsoleMode(IntPtr handle, uint mode);
 }

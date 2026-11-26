@@ -1,4 +1,4 @@
-﻿namespace RogBacklightTimeout.Tests;
+namespace RogBacklightTimeout.Tests;
 
 public sealed class InputSourcesTests
 {

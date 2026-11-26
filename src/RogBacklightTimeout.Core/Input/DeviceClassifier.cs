@@ -1,4 +1,4 @@
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Input;
 
 /// <summary>Everything Plug and Play tells us about one raw-input device.</summary>
 /// <param name="InterfacePath">The Raw Input device path (a device interface path).</param>
@@ -6,14 +6,14 @@ namespace RogBacklightTimeout;
 /// <param name="ContainerId">DEVPKEY_Device_ContainerId; null when unavailable.</param>
 /// <param name="RemovalPolicy">DEVPKEY_Device_RemovalPolicy (1 = expected no removal, 3 = surprise removal OK); informational.</param>
 /// <param name="AncestorInstanceIds">Instance IDs of the parents, nearest first (e.g. USB function, USB device, root hub, PCI...).</param>
-public sealed record DeviceFacts(
+internal sealed record DeviceFacts(
     string InterfacePath,
     string? InstanceId,
     Guid? ContainerId,
     uint? RemovalPolicy,
     IReadOnlyList<string> AncestorInstanceIds);
 
-public enum VerdictReason
+internal enum VerdictReason
 {
     OverrideInternal,
     OverrideExternal,
@@ -25,7 +25,7 @@ public enum VerdictReason
     FallbackNoBuiltInKeyboard,
 }
 
-public readonly record struct Verdict(bool IsInternal, VerdictReason Reason)
+internal readonly record struct Verdict(bool IsInternal, VerdictReason Reason)
 {
     public string Describe() => Reason switch
     {
@@ -42,7 +42,7 @@ public readonly record struct Verdict(bool IsInternal, VerdictReason Reason)
 }
 
 /// <summary>User overrides: case-insensitive substrings matched against the interface path and instance ID.</summary>
-public sealed record DeviceOverrides(IReadOnlyList<string> Internal, IReadOnlyList<string> External)
+internal sealed record DeviceOverrides(IReadOnlyList<string> Internal, IReadOnlyList<string> External)
 {
     public static DeviceOverrides None { get; } = new([], []);
 }
@@ -57,7 +57,7 @@ public sealed record DeviceOverrides(IReadOnlyList<string> Internal, IReadOnlyLi
 /// https://learn.microsoft.com/windows-hardware/drivers/install/overview-of-container-ids
 /// https://learn.microsoft.com/windows-hardware/drivers/install/using-acpi-for-device-container-grouping
 /// </summary>
-public static class DeviceClassifier
+internal static class DeviceClassifier
 {
     public static readonly Guid LocalMachineContainer = new("00000000-0000-0000-FFFF-FFFFFFFFFFFF");
 

@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using RogBacklightTimeout.Diagnostics;
+using RogBacklightTimeout.Input;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Platform;
 
 /// <summary>
 /// A hidden top-level window and its message loop: the single place where Windows talks to the agent.
@@ -23,45 +25,56 @@ internal sealed unsafe class MessageWindow : IDisposable
 
     private readonly Native.WndProc _wndProc; // kept alive for the lifetime of the window class
     private readonly ConcurrentQueue<Action> _posted = new();
-    private IntPtr _hwnd;
+    private readonly HashSet<HidUsage> _listening = [];
+    private readonly ILog _log;
+    private IntPtr _instance;
     private IntPtr _className;
+    private volatile IntPtr _hwnd; // read by Post and Quit from other threads
     private IntPtr _lidNotification;
     private IntPtr _powerSourceNotification;
     private bool _sessionNotification;
     private bool _onConsole = true;
-    private readonly HashSet<HidUsage> _listening = new();
 
-    private readonly Action<string>? _warn;
-
-    /// <param name="warn">Receives a message when a Windows notification could not be registered.</param>
-    public MessageWindow(Action<string>? warn = null)
+    public MessageWindow(ILog log)
     {
         _wndProc = WindowProc;
-        _warn = warn;
+        _log = log;
     }
 
     /// <summary>A keyboard, touchpad or Fn-key event; the argument is the Raw Input device handle (zero = injected/virtual).</summary>
     public event Action<IntPtr>? RawInput;
 
     public event Action? DevicesChanged;
+
     public event Action? Resumed;
-    public event Action<bool>? PowerSourceChanged;    // true = battery
-    public event Action<bool>? LidChanged;            // true = closed
-    public event Action<bool>? SessionDisconnected;   // true = lost the console, false = regained
-    public event Action? SessionEnding;               // may still be cancelled
+
+    /// <summary>The argument is true on battery.</summary>
+    public event Action<bool>? PowerSourceChanged;
+
+    /// <summary>The argument is true when the lid closed.</summary>
+    public event Action<bool>? LidChanged;
+
+    /// <summary>The argument is true when this session lost the physical console, false when it got it back.</summary>
+    public event Action<bool>? SessionDisconnected;
+
+    /// <summary>Logoff or shutdown was requested; it may still be cancelled.</summary>
+    public event Action? SessionEnding;
+
     public event Action? SessionEnded;
 
     /// <summary>Queue work to run on the message-loop thread; safe to call from any thread.</summary>
     public void Post(Action action)
     {
         _posted.Enqueue(action);
-        if (_hwnd != IntPtr.Zero) Native.PostMessageW(_hwnd, Native.WM_APP, IntPtr.Zero, IntPtr.Zero);
+        var hwnd = _hwnd;
+        if (hwnd != IntPtr.Zero) Native.PostMessageW(hwnd, Native.WM_APP, IntPtr.Zero, IntPtr.Zero);
     }
 
     /// <summary>Ask the loop to end (safe from any thread).</summary>
     public void Quit()
     {
-        if (_hwnd != IntPtr.Zero) Native.PostMessageW(_hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        var hwnd = _hwnd;
+        if (hwnd != IntPtr.Zero) Native.PostMessageW(hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
     }
 
     /// <summary>Creates the window and pumps messages until <see cref="Quit"/>.</summary>
@@ -73,41 +86,6 @@ internal sealed unsafe class MessageWindow : IDisposable
             Native.TranslateMessage(in message);
             Native.DispatchMessageW(in message);
         }
-    }
-
-    private void Create()
-    {
-        var instance = Native.GetModuleHandleW(null);
-        _className = Marshal.StringToHGlobalUni(ClassName);
-        var windowClass = new Native.WNDCLASSEXW
-        {
-            cbSize = (uint)sizeof(Native.WNDCLASSEXW),
-            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
-            hInstance = instance,
-            lpszClassName = _className,
-        };
-        if (Native.RegisterClassExW(in windowClass) == 0)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "RegisterClassEx failed");
-
-        _hwnd = Native.CreateWindowExW(Native.WS_EX_TOOLWINDOW, ClassName, "RogBacklightTimeout", Native.WS_POPUP,
-            0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
-        if (_hwnd == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateWindowEx failed");
-
-        ListenTo(InputSources.Always);
-        // Registration failures are not fatal (input still works) but leave the lid, AC/battery or session safeguard
-        // without events: log them.
-        _lidNotification = Native.RegisterPowerSettingNotification(_hwnd, Native.LidSwitchStateChange, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
-        if (_lidNotification == IntPtr.Zero) _warn?.Invoke($"Could not register for lid notifications (error {Marshal.GetLastWin32Error()})");
-        _powerSourceNotification = Native.RegisterPowerSettingNotification(_hwnd, Native.AcDcPowerSource, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
-        if (_powerSourceNotification == IntPtr.Zero) _warn?.Invoke($"Could not register for power source notifications (error {Marshal.GetLastWin32Error()})");
-        _sessionNotification = Native.WTSRegisterSessionNotification(_hwnd, Native.NOTIFY_FOR_THIS_SESSION);
-        if (!_sessionNotification) _warn?.Invoke($"Could not register for session notifications (error {Marshal.GetLastWin32Error()})");
-
-        CheckConsole(); // started inside a remote session or while another user holds the console
-
-        // Work queued before the window existed.
-        if (!_posted.IsEmpty) Native.PostMessageW(_hwnd, Native.WM_APP, IntPtr.Zero, IntPtr.Zero);
     }
 
     /// <summary>
@@ -123,18 +101,78 @@ internal sealed unsafe class MessageWindow : IDisposable
         var added = usages.Where(u => !_listening.Contains(u)).Distinct().ToArray();
         if (_hwnd == IntPtr.Zero || added.Length == 0) return [];
 
-        const uint flags = Native.RIDEV_INPUTSINK | Native.RIDEV_DEVNOTIFY;
+        const uint Flags = Native.RIDEV_INPUTSINK | Native.RIDEV_DEVNOTIFY;
         var devices = new Native.RAWINPUTDEVICE[added.Length];
         for (var i = 0; i < devices.Length; i++)
-            devices[i] = new() { UsagePage = added[i].Page, Usage = added[i].Id, Flags = flags, Target = _hwnd };
+            devices[i] = new() { UsagePage = added[i].Page, Usage = added[i].Id, Flags = Flags, Target = _hwnd };
 
         fixed (Native.RAWINPUTDEVICE* p = devices)
         {
             if (!Native.RegisterRawInputDevices(p, (uint)devices.Length, (uint)sizeof(Native.RAWINPUTDEVICE)))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "RegisterRawInputDevices failed");
+                throw new Win32Exception(Marshal.GetLastPInvokeError(), "RegisterRawInputDevices failed");
         }
         _listening.UnionWith(added);
         return added;
+    }
+
+    public void Dispose()
+    {
+        if (_hwnd != IntPtr.Zero) Native.DestroyWindow(_hwnd); // only if Run never finished: WM_CLOSE already destroyed it
+        if (_className != IntPtr.Zero)
+        {
+            Native.UnregisterClassW(ClassName, _instance);
+            Marshal.FreeHGlobal(_className);
+            _className = IntPtr.Zero;
+        }
+    }
+
+    /// <summary>
+    /// True when this session is the one at the physical keyboard. 0xFFFFFFFF means no session is attached to the
+    /// console right now (e.g. mid-switch), which is also "not ours".
+    /// </summary>
+    internal static bool IsOnConsole(uint consoleSession, uint ownSession) =>
+        consoleSession != 0xFFFFFFFF && consoleSession == ownSession;
+
+    private static bool OnConsoleNow()
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        return IsOnConsole(Native.WTSGetActiveConsoleSessionId(), (uint)process.SessionId);
+    }
+
+    private void Create()
+    {
+        _instance = Native.GetModuleHandleW(null);
+        _className = Marshal.StringToHGlobalUni(ClassName);
+        var windowClass = new Native.WNDCLASSEXW
+        {
+            cbSize = (uint)sizeof(Native.WNDCLASSEXW),
+            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
+            hInstance = _instance,
+            lpszClassName = _className,
+        };
+        if (Native.RegisterClassExW(in windowClass) == 0)
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "RegisterClassEx failed");
+
+        _hwnd = Native.CreateWindowExW(Native.WS_EX_TOOLWINDOW, ClassName, "RogBacklightTimeout", Native.WS_POPUP,
+            0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, _instance, IntPtr.Zero);
+        if (_hwnd == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "CreateWindowEx failed");
+
+        ListenTo(InputSources.Always);
+
+        // Registration failures are not fatal (input still works) but leave the lid, AC/battery or session safeguard
+        // without events: log them.
+        _lidNotification = Native.RegisterPowerSettingNotification(_hwnd, Native.LidSwitchStateChange, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
+        if (_lidNotification == IntPtr.Zero) _log.Warning($"Could not register for lid notifications (error {Marshal.GetLastPInvokeError()})");
+        _powerSourceNotification = Native.RegisterPowerSettingNotification(_hwnd, Native.AcDcPowerSource, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
+        if (_powerSourceNotification == IntPtr.Zero) _log.Warning($"Could not register for power source notifications (error {Marshal.GetLastPInvokeError()})");
+        _sessionNotification = Native.WTSRegisterSessionNotification(_hwnd, Native.NOTIFY_FOR_THIS_SESSION);
+        if (!_sessionNotification) _log.Warning($"Could not register for session notifications (error {Marshal.GetLastPInvokeError()})");
+
+        CheckConsole(); // started inside a remote session or while another user holds the console
+
+        // Work queued before the window existed.
+        if (!_posted.IsEmpty) Native.PostMessageW(_hwnd, Native.WM_APP, IntPtr.Zero, IntPtr.Zero);
     }
 
     private IntPtr WindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
@@ -153,14 +191,14 @@ internal sealed unsafe class MessageWindow : IDisposable
                     while (_posted.TryDequeue(out var action)) action();
                     return IntPtr.Zero;
                 case Native.WM_POWERBROADCAST:
-                    HandlePowerBroadcast((int)wParam, lParam);
-                    return (IntPtr)1; // TRUE
+                    HandlePowerBroadcast((int)wParam.ToInt64(), lParam);
+                    return 1; // TRUE
                 case Native.WM_WTSSESSION_CHANGE:
-                    HandleSessionChange((int)wParam);
+                    HandleSessionChange((int)wParam.ToInt64());
                     return IntPtr.Zero;
                 case Native.WM_QUERYENDSESSION:
                     SessionEnding?.Invoke();
-                    return (IntPtr)1; // never veto a logoff or shutdown
+                    return 1; // never veto a logoff or shutdown
                 case Native.WM_ENDSESSION:
                     if (wParam != IntPtr.Zero) SessionEnded?.Invoke();
                     return IntPtr.Zero;
@@ -170,10 +208,11 @@ internal sealed unsafe class MessageWindow : IDisposable
                     return IntPtr.Zero;
             }
         }
+#pragma warning disable CA1031 // An exception must never cross the native boundary: it would take the agent down.
         catch (Exception ex)
+#pragma warning restore CA1031
         {
-            // An exception must never cross the native boundary: it would take the agent down.
-            Log.Instance.Error($"Message handler failed: {ex.Message}");
+            _log.Error($"Message handler failed: {ex}");
         }
         return Native.DefWindowProcW(hwnd, message, wParam, lParam);
     }
@@ -182,7 +221,7 @@ internal sealed unsafe class MessageWindow : IDisposable
     {
         Native.RAWINPUTHEADER header;
         var size = (uint)sizeof(Native.RAWINPUTHEADER);
-        if (Native.GetRawInputData(lParam, Native.RID_HEADER, &header, ref size, size) == uint.MaxValue) return;
+        if (Native.GetRawInputData(lParam, Native.RID_HEADER, &header, ref size, size) == Native.RawInputError) return;
         if (header.Type != Native.RIM_TYPEKEYBOARD && header.Type != Native.RIM_TYPEHID) return;
         RawInput?.Invoke(header.Device);
     }
@@ -204,16 +243,6 @@ internal sealed unsafe class MessageWindow : IDisposable
                 break;
         }
     }
-
-    /// <summary>
-    /// True when this session is the one at the physical keyboard. 0xFFFFFFFF means no session is attached to the
-    /// console right now (e.g. mid-switch), which is also "not ours".
-    /// </summary>
-    internal static bool IsOnConsole(uint consoleSession, uint ownSession) =>
-        consoleSession != 0xFFFFFFFF && consoleSession == ownSession;
-
-    private static bool OnConsoleNow() =>
-        IsOnConsole(Native.WTSGetActiveConsoleSessionId(), (uint)System.Diagnostics.Process.GetCurrentProcess().SessionId);
 
     /// <summary>
     /// Connect/disconnect messages only say that something changed; the console owner is looked up each time, so a
@@ -241,12 +270,6 @@ internal sealed unsafe class MessageWindow : IDisposable
         if (_sessionNotification) Native.WTSUnRegisterSessionNotification(_hwnd);
         _lidNotification = _powerSourceNotification = IntPtr.Zero;
         _sessionNotification = false;
-        if (_className != IntPtr.Zero) { Marshal.FreeHGlobal(_className); _className = IntPtr.Zero; }
-    }
-
-    public void Dispose()
-    {
-        if (_hwnd != IntPtr.Zero) Native.DestroyWindow(_hwnd);
-        _hwnd = IntPtr.Zero;
+        _hwnd = IntPtr.Zero; // destroyed: nothing may post to it any more
     }
 }

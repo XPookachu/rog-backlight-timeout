@@ -1,12 +1,14 @@
-namespace RogBacklightTimeout;
+using RogBacklightTimeout.Diagnostics;
 
-public interface IBacklight
+namespace RogBacklightTimeout.Core;
+
+internal interface IBacklight
 {
     /// <summary>Sets keyboard backlight brightness (0 = off, 3 = max). Only brightness: effect/colour stay untouched.</summary>
     void SetLevel(int level);
 }
 
-public interface ILevelSource
+internal interface ILevelSource
 {
     /// <summary>The brightness the user wants while active (G-Helper's current setting for AC/battery).</summary>
     int GetRestoreLevel();
@@ -25,7 +27,7 @@ public interface ILevelSource
 /// is the single place that decides whether to dim or restore.
 /// Thread-safe: input, timer, power and session events arrive on different threads.
 /// </summary>
-public sealed class IdleController : IDisposable
+internal sealed class IdleController : IDisposable
 {
     private enum KeyboardState
     {
@@ -192,7 +194,7 @@ public sealed class IdleController : IDisposable
         }
 
         if (_lidClosed || _state == KeyboardState.Dark) return;
-        if (_time.GetElapsedTime(_lastActivity) >= TimeSpan.FromSeconds(settings.TimeoutSeconds)) Dim();
+        if (_time.GetElapsedTime(_lastActivity) >= settings.Timeout) Dim();
     }
 
     /// <summary>Something outside the agent may have changed the brightness; if we had dimmed, we no longer know the state.</summary>
@@ -204,7 +206,8 @@ public sealed class IdleController : IDisposable
     private void Touch()
     {
         _lastActivity = _time.GetTimestamp();
-        if (!_timerArmed && !_stopped && _settings().Enabled) Arm(TimeSpan.FromSeconds(_settings().TimeoutSeconds));
+        var settings = _settings();
+        if (!_timerArmed && !_stopped && settings.Enabled) Arm(settings.Timeout);
     }
 
     private void Arm(TimeSpan due)
@@ -224,7 +227,7 @@ public sealed class IdleController : IDisposable
             {
                 var settings = _settings();
                 if (!settings.Enabled || _lidClosed || _disconnected) return;
-                var timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
+                var timeout = settings.Timeout;
 
                 // G-Helper changed its settings while we are dark (e.g. Fn brightness keys): the user is at the
                 // keyboard and the light may be on again. Forget "dimmed", dim again after the next idle period.
@@ -245,8 +248,8 @@ public sealed class IdleController : IDisposable
             catch (Exception ex)
             {
                 // A timer callback must never take the agent down.
-                _log.Info($"Timer error: {ex.Message}");
-                if (!_stopped && _settings().Enabled) Arm(TimeSpan.FromSeconds(_settings().TimeoutSeconds));
+                _log.Error($"Timer error: {ex.Message}");
+                if (!_stopped && _settings().Enabled) Arm(_settings().Timeout);
             }
         }
     }
@@ -281,7 +284,7 @@ public sealed class IdleController : IDisposable
         try { return _levels.GetRestoreLevel(); }
         catch (Exception ex)
         {
-            _log.Info($"Could not determine brightness level: {ex.Message}");
+            _log.Warning($"Could not determine brightness level: {ex.Message}");
             return _settings().FallbackLevel;
         }
     }
@@ -296,7 +299,7 @@ public sealed class IdleController : IDisposable
         }
         catch (Exception ex)
         {
-            _log.Info($"Backlight write failed ({reason}): {ex.Message}");
+            _log.Warning($"Backlight write failed ({reason}): {ex.Message}");
             return false;
         }
     }

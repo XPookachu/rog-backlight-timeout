@@ -1,34 +1,54 @@
 using System.Diagnostics;
 using System.Text;
+using RogBacklightTimeout.Core;
+using RogBacklightTimeout.Diagnostics;
+using RogBacklightTimeout.Installation;
+using RogBacklightTimeout.Rog;
 
 namespace RogBacklightTimeout.Ui;
 
-internal enum Tone { Info, Good, Bad }
+internal enum Tone
+{
+    Info,
+    Good,
+    Bad,
+}
 
 internal sealed record Notice(Tone Tone, string Text);
 
 /// <summary>The interactive menu: a status panel and a short list of actions. Arrow keys or number keys, Enter to select.</summary>
-internal static class Menu
+internal sealed class Menu
 {
     private const string Title = "ROG Backlight Timeout";
     private const int Width = 64;
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan KeyPollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(6);
     private static readonly string Rule = "  " + Ansi.Gray + new string('─', Width - 2) + Ansi.Reset;
 
+    private readonly ILog _log;
+    private readonly SnapshotSource _source;
+    private bool _quit;
+
+    public Menu(ILog log)
+    {
+        _log = log;
+        _source = new SnapshotSource(log);
+    }
+
+    /// <summary>One menu entry. <c>Run</c> may show progress through the callback and returns the notice to show afterwards.</summary>
     private sealed record Item(string Label, Func<Action<Notice>, Notice?> Run);
 
-    private static bool _quit;
-
-    public static int Run()
+    public int Run()
     {
         ConsoleHost.Open(Title);
-        var source = new SnapshotSource();
         Console.Write(Ansi.ClearScreen + Ansi.HideCursor);
 
         try
         {
-            Snapshot snapshot = source.Take();
-            List<Item> items = BuildItems(snapshot, source);
-            var nextPoll = DateTime.UtcNow.AddSeconds(1);
+            var snapshot = _source.Take();
+            var items = BuildItems(snapshot);
+            var nextRefresh = Stopwatch.StartNew();
             var selected = 0;
             Notice? notice = null;
             var lastFrame = "";
@@ -43,43 +63,33 @@ internal static class Menu
 
             void Refresh()
             {
-                snapshot = source.Take();
-                items = BuildItems(snapshot, source);
+                snapshot = _source.Take();
+                items = BuildItems(snapshot);
                 selected = Math.Clamp(selected, 0, items.Count - 1);
-                nextPoll = DateTime.UtcNow.AddSeconds(1);
+                nextRefresh.Restart();
             }
 
             while (!_quit)
             {
-                if (DateTime.UtcNow >= nextPoll) Refresh();
+                if (nextRefresh.Elapsed >= RefreshInterval) Refresh();
                 Draw();
 
                 if (!Console.KeyAvailable)
                 {
-                    Thread.Sleep(50);
+                    Thread.Sleep(KeyPollInterval);
                     continue;
                 }
 
-                var key = Console.ReadKey(intercept: true);
-                var pick = -1;
-                switch (key.Key)
-                {
-                    case ConsoleKey.UpArrow: selected = (selected + items.Count - 1) % items.Count; break;
-                    case ConsoleKey.DownArrow: selected = (selected + 1) % items.Count; break;
-                    case ConsoleKey.Home: selected = 0; break;
-                    case ConsoleKey.End: selected = items.Count - 1; break;
-                    case ConsoleKey.Enter: pick = selected; break;
-                    case ConsoleKey.Escape:
-                    case ConsoleKey.Q: _quit = true; break;
-                    default:
-                        if (key.KeyChar is >= '1' and <= '9' && key.KeyChar - '1' < items.Count) pick = key.KeyChar - '1';
-                        break;
-                }
-
+                var pick = HandleKey(Console.ReadKey(intercept: true), items.Count, ref selected);
                 if (pick < 0) continue;
+
                 selected = pick;
                 notice = null;
-                notice = items[pick].Run(shown => { notice = shown; Draw(); });
+                notice = items[pick].Run(shown =>
+                {
+                    notice = shown;
+                    Draw();
+                });
                 if (_quit) break; // do not touch anything else: the exe this process runs from may be gone
                 Console.Write(Ansi.ClearScreen); // actions may have used the whole screen
                 lastFrame = "";
@@ -93,9 +103,37 @@ internal static class Menu
         return 0;
     }
 
+    /// <summary>Moves the selection; returns the index of the item to run, or -1.</summary>
+    private int HandleKey(ConsoleKeyInfo key, int count, ref int selected)
+    {
+        switch (key.Key)
+        {
+            case ConsoleKey.UpArrow:
+                selected = (selected + count - 1) % count;
+                return -1;
+            case ConsoleKey.DownArrow:
+                selected = (selected + 1) % count;
+                return -1;
+            case ConsoleKey.Home:
+                selected = 0;
+                return -1;
+            case ConsoleKey.End:
+                selected = count - 1;
+                return -1;
+            case ConsoleKey.Enter:
+                return selected;
+            case ConsoleKey.Escape:
+            case ConsoleKey.Q:
+                _quit = true;
+                return -1;
+            default:
+                return key.KeyChar is >= '1' and <= '9' && key.KeyChar - '1' < count ? key.KeyChar - '1' : -1;
+        }
+    }
+
     // ---- items ----
 
-    private static List<Item> BuildItems(Snapshot s, SnapshotSource source)
+    private List<Item> BuildItems(Snapshot s)
     {
         var items = new List<Item>
         {
@@ -110,33 +148,39 @@ internal static class Menu
                 : new Item("Start agent", _ => StartAgent()));
         }
 
-        items.Add(new Item(
-            s.Autostart.IsInstalled ? "Reinstall / update" : "Install (start at logon)",
-            show => Install(s, show, source)));
+        items.Add(new Item(s.Autostart.IsInstalled ? "Reinstall / update" : "Install (start at logon)", show => Install(s, show)));
 
         if (s.Autostart.IsInstalled || Directory.Exists(AppPaths.InstallDir))
-            items.Add(new Item("Uninstall", show => Uninstall(show, source)));
+            items.Add(new Item("Uninstall", Uninstall));
 
-        items.Add(new Item("Input devices", _ => { Screens.Devices(s.Settings); return null; }));
+        items.Add(new Item("Input devices", _ =>
+        {
+            Screens.Devices(s.Settings, _log);
+            return null;
+        }));
         items.Add(new Item("Open log", _ => OpenLog()));
-        items.Add(new Item("Quit", _ => { _quit = true; return null; }));
+        items.Add(new Item("Quit", _ =>
+        {
+            _quit = true;
+            return null;
+        }));
         return items;
     }
 
-    private static Notice ToggleTimeout()
+    private Notice ToggleTimeout()
     {
-        var settings = SettingsStore.Load();
+        var settings = SettingsStore.Load(_log);
         var enabled = !settings.Enabled;
         SettingsStore.Save(settings with { Enabled = enabled });
         return Applied($"Timeout turned {(enabled ? "on" : "off")}.");
     }
 
-    private static Notice? SetTimeout(int current)
+    private Notice? SetTimeout(int current)
     {
         var seconds = Screens.AskSeconds(current);
         if (seconds is null) return null;
 
-        SettingsStore.Save(SettingsStore.Load() with { TimeoutSeconds = seconds.Value });
+        SettingsStore.Save(SettingsStore.Load(_log) with { TimeoutSeconds = seconds.Value });
         return Applied($"Timeout set to {seconds.Value} seconds.");
     }
 
@@ -147,47 +191,49 @@ internal static class Menu
 
     private static Notice StartAgent()
     {
-        var (ok, message) = Autostart.Run();
-        return ok ? new Notice(Tone.Good, "Agent started.") : new Notice(Tone.Bad, $"Could not start the agent: {message}");
+        var run = LogonTask.Run();
+        return run.Ok ? new Notice(Tone.Good, "Agent started.") : new Notice(Tone.Bad, $"Could not start the agent: {run.Message}");
     }
 
     private static Notice StopAgent() =>
-        AgentControl.StopAndWait(TimeSpan.FromSeconds(6))
+        AgentControl.StopAndWait(StopTimeout)
             ? new Notice(Tone.Good, "Agent stopped. The backlight is back on.")
             : new Notice(Tone.Bad, "The agent did not stop. End RogBacklightTimeout.exe in Task Manager.");
 
-    private static Notice Install(Snapshot s, Action<Notice> show, SnapshotSource source)
+    private Notice Install(Snapshot s, Action<Notice> show)
     {
         if (!s.Probe.Supported && !s.Probe.Retryable)
             return new Notice(Tone.Bad, $"This laptop is not supported: {s.Probe.Detail}.");
 
         show(new Notice(Tone.Info, "Waiting for administrator approval…"));
-        var (ok, message) = Program.Elevated.Request(install: true);
-        source.InvalidateAutostart();
-        return new Notice(ok ? Tone.Good : Tone.Bad, message);
+        var outcome = Elevation.Request(install: true, _log);
+        _source.Invalidate();
+        return ToNotice(outcome);
     }
 
-    private static Notice? Uninstall(Action<Notice> show, SnapshotSource source)
+    private Notice? Uninstall(Action<Notice> show)
     {
         if (!Screens.Confirm("Uninstall ROG Backlight Timeout?",
-                "This stops the agent, removes autostart and deletes the installed program.",
-                $"Your settings and log in {AppPaths.Dir} are kept."))
+                "This stops the agent, removes autostart and deletes the installed program and its log.",
+                $"Your settings in {AppPaths.UserDataDir} are kept."))
             return null;
 
         show(new Notice(Tone.Info, "Waiting for administrator approval…"));
-        var (ok, message) = Program.Elevated.Request(install: false);
-        source.InvalidateAutostart();
+        var outcome = Elevation.Request(install: false, _log);
+        _source.Invalidate();
 
         // This window runs from the file that was just removed: assemblies not loaded yet could no longer be read from it,
         // so say goodbye and close instead of carrying on.
-        if (ok && RunsFromInstallFolder())
+        if (outcome.Ok && RunsFromInstallFolder())
         {
-            show(new Notice(Tone.Good, $"{message} Press any key to close."));
+            show(new Notice(Tone.Good, $"{outcome.Message} Press any key to close."));
             Console.ReadKey(intercept: true);
             _quit = true;
         }
-        return new Notice(ok ? Tone.Good : Tone.Bad, message);
+        return ToNotice(outcome);
     }
+
+    private static Notice ToNotice(Outcome outcome) => new(outcome.Ok ? Tone.Good : Tone.Bad, outcome.Message);
 
     private static bool RunsFromInstallFolder()
     {
@@ -198,9 +244,13 @@ internal static class Menu
 
     private static Notice OpenLog()
     {
-        if (!File.Exists(AppPaths.LogFile)) return new Notice(Tone.Info, "There is no log yet.");
-        Process.Start(new ProcessStartInfo("notepad.exe", $"\"{AppPaths.LogFile}\"") { UseShellExecute = false });
-        return new Notice(Tone.Info, "Opened the log in Notepad.");
+        var file = AppLog.MostRelevantFile();
+        if (file is null) return new Notice(Tone.Info, "There is no log yet.");
+
+        var startInfo = new ProcessStartInfo("notepad.exe") { UseShellExecute = false };
+        startInfo.ArgumentList.Add(file);
+        using var notepad = Process.Start(startInfo);
+        return new Notice(Tone.Info, $"Opened {file} in Notepad.");
     }
 
     // ---- rendering ----

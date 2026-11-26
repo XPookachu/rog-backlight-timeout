@@ -1,6 +1,8 @@
-namespace RogBacklightTimeout;
+using RogBacklightTimeout.Diagnostics;
 
-public interface IInputClassifier
+namespace RogBacklightTimeout.Input;
+
+internal interface IInputClassifier
 {
     Verdict Classify(string interfacePath);
 
@@ -14,7 +16,7 @@ public interface IInputClassifier
 /// everything as external would mean nothing could ever wake the backlight. In that case all hardware
 /// devices count, which degrades to G-Helper's own behaviour instead of failing.
 /// </summary>
-public sealed class InputClassifier : IInputClassifier
+internal sealed class InputClassifier : IInputClassifier
 {
     private readonly Func<DeviceOverrides> _overrides;
     private readonly Func<string, DeviceFacts?> _inspect;
@@ -53,9 +55,8 @@ public sealed class InputClassifier : IInputClassifier
         var found = keyboards.Any(path => ClassifyStrict(path).IsInternal);
         if (found != _hasBuiltInKeyboard)
         {
-            _log.Info(found
-                ? "Built-in keyboard detected"
-                : "WARNING: no built-in keyboard detected; counting all hardware input until one appears");
+            if (found) _log.Info("Built-in keyboard detected");
+            else _log.Warning("No built-in keyboard detected; counting all hardware input until one appears");
         }
         _hasBuiltInKeyboard = found;
     }

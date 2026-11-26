@@ -1,4 +1,4 @@
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Input;
 
 /// <summary>
 /// Maps Raw Input device handles to a built-in/external verdict and remembers it, so the Plug and Play lookup

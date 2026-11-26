@@ -1,0 +1,26 @@
+<Project>
+
+  <!-- Central package versions. Every PackageReference in the repo takes its version from here. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <!-- Build tooling -->
+  <ItemGroup>
+    <PackageVersion Include="MinVer" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- Runtime -->
+  <ItemGroup>
+    <!-- HID access to the Aura keyboard controller (Apache-2.0, see THIRD-PARTY-NOTICES.md). -->
+    <PackageVersion Include="HidSharp" Version="2.6.4" />
+  </ItemGroup>
+
+  <!-- Tests -->
+  <ItemGroup>
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.1" />
+  </ItemGroup>
+
+</Project>

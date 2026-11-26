@@ -1,6 +1,6 @@
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Platform;
 
-public static class PowerStatus
+internal static class PowerStatus
 {
     private const byte AcOnline = 1;
 

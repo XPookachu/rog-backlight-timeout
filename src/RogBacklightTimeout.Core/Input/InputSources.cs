@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Input;
 
 /// <summary>A HID top-level collection to receive through Raw Input.</summary>
 internal readonly record struct HidUsage(ushort Page, ushort Id)

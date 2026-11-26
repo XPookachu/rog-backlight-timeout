@@ -1,9 +1,9 @@
 using Microsoft.Win32;
 
-namespace RogBacklightTimeout;
+namespace RogBacklightTimeout.Rog;
 
 /// <summary>SMBIOS identity of this computer (what Windows exposes in the registry).</summary>
-public sealed record PlatformInfo(string Manufacturer, string Family, string Product)
+internal sealed record PlatformInfo(string Manufacturer, string Family, string Product)
 {
     public bool IsAsus => Manufacturer.Contains("ASUS", StringComparison.OrdinalIgnoreCase);
 
@@ -29,7 +29,7 @@ public sealed record PlatformInfo(string Manufacturer, string Family, string Pro
         $"{Manufacturer} | {(string.IsNullOrWhiteSpace(Family) ? "(no family)" : Family)} | {Product}";
 }
 
-public static class RogPlatform
+internal static class RogPlatform
 {
     private const string BiosKey = @"HARDWARE\DESCRIPTION\System\BIOS";
 

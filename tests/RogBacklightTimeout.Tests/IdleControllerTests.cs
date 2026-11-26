@@ -25,11 +25,6 @@ public sealed class IdleControllerTests
         public int GetRestoreLevel() => Throw ? throw new InvalidOperationException("bad config") : Level;
     }
 
-    private sealed class NullLog : ILog
-    {
-        public void Info(string message) { }
-    }
-
     private sealed class Harness : IDisposable
     {
         public FakeTimeProvider Time { get; } = new();
@@ -42,7 +37,7 @@ public sealed class IdleControllerTests
         {
             Levels = new FakeLevels(level);
             Settings = new Settings { Enabled = enabled, TimeoutSeconds = timeoutSeconds };
-            Controller = new IdleController(Backlight, Levels, Time, () => Settings, new NullLog());
+            Controller = new IdleController(Backlight, Levels, Time, () => Settings, NullLog.Instance);
         }
 
         public void Dispose() => Controller.Dispose();

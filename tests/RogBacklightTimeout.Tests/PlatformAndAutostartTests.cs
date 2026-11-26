@@ -39,7 +39,7 @@ public sealed class PlatformGatingTests
     }
 }
 
-public sealed class TaskXmlTests
+public sealed class LogonTaskTests
 {
     private static readonly XNamespace Ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
@@ -48,7 +48,7 @@ public sealed class TaskXmlTests
     [InlineData(false, "LeastPrivilege")]
     public void Builds_a_valid_task_with_the_requested_run_level(bool elevated, string runLevel)
     {
-        var doc = XDocument.Parse(TaskXml.Build(@"PC\me", @"C:\Program Files\RogBacklightTimeout\RogBacklightTimeout.exe", elevated));
+        var doc = XDocument.Parse(LogonTask.BuildXml(@"PC\me", @"C:\Program Files\RogBacklightTimeout\RogBacklightTimeout.exe", elevated));
 
         Assert.Equal(runLevel, doc.Descendants(Ns + "RunLevel").Single().Value);
         Assert.Equal(@"C:\Program Files\RogBacklightTimeout\RogBacklightTimeout.exe", doc.Descendants(Ns + "Command").Single().Value);
@@ -62,10 +62,31 @@ public sealed class TaskXmlTests
     [Fact]
     public void Special_characters_in_user_and_path_are_escaped()
     {
-        var doc = XDocument.Parse(TaskXml.Build(@"DOMAIN\a&b<c>", @"C:\R&D\x.exe", elevated: true));
+        var doc = XDocument.Parse(LogonTask.BuildXml(@"DOMAIN\a&b<c>", @"C:\R&D\x.exe", elevated: true));
 
         Assert.Equal(@"DOMAIN\a&b<c>", doc.Descendants(Ns + "UserId").First().Value);
         Assert.Equal(@"C:\R&D\x.exe", doc.Descendants(Ns + "Command").Single().Value);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_registered_task_is_read_back_with_its_run_level_and_command(bool elevated)
+    {
+        var info = LogonTask.Parse(LogonTask.BuildXml(@"PC\me", @"C:\R&D\RogBacklightTimeout.exe", elevated));
+
+        Assert.Equal(elevated ? AutostartState.Installed : AutostartState.InstalledNotElevated, info.State);
+        Assert.Equal(@"C:\R&D\RogBacklightTimeout.exe", info.ExePath);
+        Assert.True(info.IsInstalled);
+    }
+
+    [Fact]
+    public void An_unreadable_task_definition_asks_for_a_reinstall_instead_of_throwing()
+    {
+        var info = LogonTask.Parse("ERROR: not xml");
+
+        Assert.Equal(AutostartState.InstalledNotElevated, info.State);
+        Assert.Null(info.ExePath);
     }
 }
 
